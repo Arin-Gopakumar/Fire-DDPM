@@ -1,0 +1,16 @@
+# wildfire_ddpm/requirements.txt
+# Core dependencies
+torch
+torchvision
+numpy
+Pillow
+
+# Image processing
+scikit-image
+# Progress tracking
+tqdm
+# Visualization
+matplotlib
+# Geospatial data handling
+rasterio
+geopandas
