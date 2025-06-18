@@ -48,9 +48,9 @@ def read_tif(p):
 
 def year_to_split(year):
     #feel free to move around these values as needed
-    if year <= 2018:
+    if year <= 2019:
         return "train"
-    if year == 2019:
+    if year == 2020:
         return "val"
     return "test"
 
