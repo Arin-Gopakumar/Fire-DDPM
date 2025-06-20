@@ -7,6 +7,7 @@ Pillow
 
 # Image processing
 scikit-image
+scikit-learn
 # Progress tracking
 tqdm
 # Visualization
