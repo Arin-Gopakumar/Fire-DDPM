@@ -205,20 +205,31 @@ class UNetConditional(nn.Module):
         Returns:
             torch.Tensor: Predicted noise (B, out_channels, H, W)
         """
+        #print("0. model input x_t:", torch.isnan(x_t).any()) #gpt debug
+        #print("0. model input context:", torch.isnan(context).any()) #gpt debug
+
         # 1. Concatenate noisy target and conditioning data
         # Ensure context is resized if necessary (though typically it should match x_t's H, W)
         if x_t.shape[2:] != context.shape[2:]:
              # This is a basic resize, consider more sophisticated alignment if aspects differ
             context = F.interpolate(context, size=x_t.shape[2:], mode='bilinear', align_corners=False)
 
+        context = torch.nan_to_num(context, nan=0.0, posinf=0.0, neginf=0.0) #gpt fix
         nn_input = torch.cat((x_t, context), dim=1) # (B, total_in_channels, H, W)
+
+        #print("1. nn_input:", torch.isnan(nn_input).any()) #gpt debug
 
         # 2. Compute time embedding
         t_emb = self.time_mlp(time) # (B, time_emb_dim)
 
+        #print("2. time embedding:", torch.isnan(t_emb).any()) #gpt debug
+
         # 3. Initial convolution
         h = self.init_conv(nn_input) # (B, model_channels, H, W)
         
+        #print("✅ After init_conv:", "has_nan:", torch.isnan(h).any().item(), "min:", h.min().item(), "max:", h.max().item()) #gpt debug
+        #print("3. init conv output:", torch.isnan(h).any()) #gpt debug
+
         # Skip connections
         skips = [h] # Store the output of init_conv as the first "skip"
 
@@ -229,17 +240,23 @@ class UNetConditional(nn.Module):
         for i in range(len(self.channel_mult)): # Iterate through resolutions // added self to channel_mult bc gpt told me to 
             for _ in range(self.num_res_blocks):
                 h = self.down_blocks[block_idx](h, t_emb)
+                #print(f"🔽 Down block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
+                #print(f"4. down block {block_idx} output:", torch.isnan(h).any()) #gpt debug
                 skips.append(h)
                 block_idx +=1
             if i < len(self.channel_mult) -1 : # If not the last resolution
                 h = self.down_blocks[block_idx](h) # Downsample conv
+                #print(f"🔽 Downsample block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
+                #print(f"5. downsample block {block_idx} output:", torch.isnan(h).any()) #gpt debug
                 skips.append(h) # Also store downsampled output before next resnet block
                 block_idx +=1
 
 
         # 5. Bottleneck
         h = self.mid_block1(h, t_emb)
+        #print("🧱 Mid block 1 has_nan:", torch.isnan(h).any().item()) #gpt debug
         h = self.mid_block2(h, t_emb)
+        #print("🧱 Mid block 2 has_nan:", torch.isnan(h).any().item()) #gpt debug
 
         # 6. Upsampling path
         # Iterate through up_blocks: UpsampleConv -> ResNet (cat skip) -> ResNet -> ...
@@ -247,6 +264,7 @@ class UNetConditional(nn.Module):
         for i in reversed(range(len(self.channel_mult))):
             if i < len(self.channel_mult) -1 : # If not the first upsampling layer (after bottleneck)
                 h = self.up_blocks[block_idx](h) # Upsample conv
+                #print(f"🔼 Up block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
                 block_idx +=1
 
             # Concatenate with skip connection. Skips are stored in reverse order of use
@@ -272,14 +290,27 @@ class UNetConditional(nn.Module):
                 if j == 0:
                     # First block in upsampling stage: concatenate skip connection
                     h = self.up_blocks[block_idx](torch.cat((h, skip_h), dim=1), t_emb)
+                    #print(f"🔼 Up block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
                 else:
                     # Subsequent blocks already assume the correct number of input channels
                     h = self.up_blocks[block_idx](h, t_emb)
+                    #print(f"🔼 Up block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
                 block_idx += 1
 
 
-        # 7. Final layer
-        return self.final_conv(h)
+        # 7. Final layer - according to gpt debug
+        output = self.final_conv(h)
+        """
+        print("🟧 UNet final output stats:",
+            "min:", output.min().item(),
+            "max:", output.max().item(),
+            "mean:", output.mean().item(),
+            "std:", output.std().item(),
+            "has_nan:", torch.isnan(output).any().item())
+        """
+        return output
+
+        #return self.final_conv(h)
 
 
 def linear_beta_schedule(timesteps, beta_start=0.0001, beta_end=0.02):
@@ -371,8 +402,24 @@ class GaussianDiffusion(nn.Module):
         if noise is None:
             noise = torch.randn_like(x_start, device=self.device)
 
+        #print("x_start has nan:", torch.isnan(x_start).any()) #gpt debug
+        #print("t has nan:", torch.isnan(t).any()) #gpt debug
+        #print("noise has nan:", torch.isnan(noise).any()) #gpt debug
+
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+
+        #print("x_noisy has nan:", torch.isnan(x_noisy).any()) #gpt debug
+
+        #if torch.isnan(x_noisy).any(): #gpt debug
+            #print("NaN detected in x_noisy") #gpt debug
+
         predicted_noise = self.model(x_noisy, t, context) # UNet predicts the noise
+
+        #if torch.isnan(predicted_noise).any(): #gpt debug
+            #print("NaN detected in predicted_noise") #gpt debug
+
+        #if torch.isnan(noise).any(): #gpt debug
+            #print("NaN detected in noise") #gpt debug
 
         if loss_type == 'l1':
             loss = F.l1_loss(noise, predicted_noise)
@@ -382,6 +429,9 @@ class GaussianDiffusion(nn.Module):
             loss = F.smooth_l1_loss(noise, predicted_noise)
         else:
             raise NotImplementedError()
+
+        #if torch.isnan(loss).any(): #gpt debug
+            #print("NaN detected in loss") #gpt debug
 
         return loss
 
