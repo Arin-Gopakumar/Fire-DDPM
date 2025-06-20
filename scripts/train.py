@@ -6,6 +6,7 @@ from torchvision.utils import save_image
 import argparse
 import logging
 from tqdm import tqdm
+import math
 
 # Adjust import paths based on your project structure
 # Assuming train.py is in wildfire_ddpm/scripts/
@@ -18,7 +19,7 @@ from utils.dataset_loader import WildfireDataset
 # --- Configuration ---
 # These can be overridden by command-line arguments
 CONFIG = {
-    "data_dir": "../data",
+    "data_dir": "../Fire-DDPM/data_2",
     "checkpoints_dir": "../checkpoints",
     "results_dir": "../outputs/training_samples", # For saving sample images during training
     "run_name": "ddpm_wildfire_run1",

@@ -110,6 +110,8 @@ class UNetConditional(nn.Module):
     ):
         super().__init__()
 
+        self.channel_mult = channel_mult #Added this bc gpt told me to
+        self.num_res_blocks = num_res_blocks #Added this bc gpt told me to 
         self.image_size = image_size
         self.in_target_channels = in_target_channels
         self.in_condition_channels = in_condition_channels
@@ -223,13 +225,13 @@ class UNetConditional(nn.Module):
         # 4. Downsampling path
         # Iterate through down_blocks: ResNet -> ResNet -> ... -> DownsampleConv
         block_idx = 0
-        num_resolutions = len(self.down_blocks) // (num_res_blocks +1) # +1 for downsample layer
-        for i in range(len(channel_mult)): # Iterate through resolutions
-            for _ in range(num_res_blocks):
+        num_resolutions = len(self.down_blocks) // (self.num_res_blocks +1) # +1 for downsample layer // gpt wanted me to add self to the num_res_blocks
+        for i in range(len(self.channel_mult)): # Iterate through resolutions // added self to channel_mult bc gpt told me to 
+            for _ in range(self.num_res_blocks):
                 h = self.down_blocks[block_idx](h, t_emb)
                 skips.append(h)
                 block_idx +=1
-            if i < len(channel_mult) -1 : # If not the last resolution
+            if i < len(self.channel_mult) -1 : # If not the last resolution
                 h = self.down_blocks[block_idx](h) # Downsample conv
                 skips.append(h) # Also store downsampled output before next resnet block
                 block_idx +=1
@@ -242,15 +244,16 @@ class UNetConditional(nn.Module):
         # 6. Upsampling path
         # Iterate through up_blocks: UpsampleConv -> ResNet (cat skip) -> ResNet -> ...
         block_idx = 0
-        for i in reversed(range(len(channel_mult))):
-            if i < len(channel_mult) -1 : # If not the first upsampling layer (after bottleneck)
+        for i in reversed(range(len(self.channel_mult))):
+            if i < len(self.channel_mult) -1 : # If not the first upsampling layer (after bottleneck)
                 h = self.up_blocks[block_idx](h) # Upsample conv
                 block_idx +=1
 
             # Concatenate with skip connection. Skips are stored in reverse order of use
             # Number of ResNet blocks per resolution is num_res_blocks.
             # There's one additional ResNet block that receives the concatenated features.
-            for j in range(num_res_blocks +1):
+            """
+            for j in range(self.num_res_blocks +1):
                 skip_h = skips.pop()
                 # print(f"Up block {block_idx}: h shape: {h.shape}, skip_h shape: {skip_h.shape}")
                 if h.size(2) != skip_h.size(2) or h.size(3) != skip_h.size(3): # Ensure spatial dims match for concat
@@ -259,6 +262,20 @@ class UNetConditional(nn.Module):
                 concat_h = torch.cat((h, skip_h), dim=1)
                 h = self.up_blocks[block_idx](concat_h, t_emb) # This should be the ResNet block
                 block_idx +=1
+            """
+            #gpt wanted me to replace that block with this:
+            for j in range(self.num_res_blocks + 1):
+                skip_h = skips.pop()
+                if h.size(2) != skip_h.size(2) or h.size(3) != skip_h.size(3): 
+                    skip_h = F.interpolate(skip_h, size=h.shape[2:], mode='bilinear', align_corners=False)
+
+                if j == 0:
+                    # First block in upsampling stage: concatenate skip connection
+                    h = self.up_blocks[block_idx](torch.cat((h, skip_h), dim=1), t_emb)
+                else:
+                    # Subsequent blocks already assume the correct number of input channels
+                    h = self.up_blocks[block_idx](h, t_emb)
+                block_idx += 1
 
 
         # 7. Final layer
@@ -300,6 +317,9 @@ class GaussianDiffusion(nn.Module):
             betas = cosine_beta_schedule(timesteps).to(self.device)
         else:
             raise ValueError(f"Unknown beta schedule type: {beta_schedule_type}")
+        
+        self.betas = betas  # Store betas for use in p_sample // gpt told me to add this
+
 
         alphas = 1. - betas
         self.alphas_cumprod = torch.cumprod(alphas, axis=0)
