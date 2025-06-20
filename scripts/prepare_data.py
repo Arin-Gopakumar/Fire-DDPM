@@ -7,6 +7,7 @@ import numpy as np
 
 #rasterio is a useful library you can use to basically work with geospatial data (hence why we're using it now)
 import rasterio
+import rasterio as rio
 from PIL import Image
 from rasterio.enums import Resampling
 from typing import Dict, List, Tuple
@@ -105,22 +106,26 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], no
             np.save(inp_dir/f"{sid}.npy", x)
 
             # mask: try last band == binary else sibling _mask.tif
-            m_arr = None
-            with rio.open(mask_src) as ds:
-                if ds.count >= 2:
-                    lb = ds.read(ds.count)
-                    if lb.max() <= 1 and lb.dtype in (np.uint8, np.uint16, np.bool_):
-                        m_arr = lb
-            if m_arr is None:
-                alt = mask_src.with_name(f"{mask_src.stem}_mask{mask_src.suffix}")
-                if alt.exists():
-                    m_arr = read_tif(alt)[0]
-            if m_arr is None:
-                continue  # skip if no mask
-            m_arr = resize(m_arr[None], sz, nearest=True)[0]
-            m_arr = (m_arr>0).astype(np.uint8)*255
-            Image.fromarray(m_arr).save(tgt_dir/f"{sid}.png")
+            # this is what gpt said to have:
+                # Use the first band of the .tif file as the target mask.
+                # Skip the sample if the mask is completely empty (all zeros).
+                # Save both the input and target only if a valid mask is found.
+
+            mask = read_tif(mask_src)[0]
+            if mask.max() == 0:
+                continue  # skip if mask is completely empty
+
+            # Save input and target (now that we know the mask is valid)
+            np.save(inp_dir / f"{sid}.npy", x)
+
+            mask = resize(mask[None], sz, nearest=True)[0]
+            mask = (mask > 0).astype(np.uint8) * 255
+
+            np.save(tgt_dir / f"{sid}.npy", mask)
+            Image.fromarray(mask).save(tgt_dir / f"{sid}.png")
             total += 1
+            #this is the end of the gpt block
+
 
 #some parsing, had to ask gpt for some of this code in this function
 def main():
