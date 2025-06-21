@@ -14,6 +14,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.ddpm_model import UNetConditional, GaussianDiffusion
 from utils.dataset_loader import WildfireDataset
+from torch.utils.data import DataLoader
+import torch
 
 def setup_evaluation_logging(config):
     """Sets up logging for the evaluation script."""
@@ -64,10 +66,11 @@ def evaluate(config):
     setup_evaluation_logging(config)
     device = torch.device(config["device"])
 
-    if not config["checkpoint_path"] or not os.path.exists(config["checkpoint_path"]):
+    logging.info(f"Checkpoint path value received: {config['checkpoint']}")
+    if not config["checkpoint"] or not os.path.exists(config["checkpoint"]):
         logging.error("A valid checkpoint path is required.")
         return
-    checkpoint = torch.load(config["checkpoint_path"], map_location=device)
+    checkpoint = torch.load(config["checkpoint"], map_location=device)
     model_config = checkpoint.get('config', {})
     logging.info(f"Loaded checkpoint from training run: {model_config.get('run_name', 'N/A')}")
 
@@ -117,7 +120,8 @@ def evaluate(config):
         pred_binary = (pred_probs > 0.5).float()
 
         for i in range(len(conditions)):
-            metrics = calculate_metrics(pred_probs[i], pred_binary[i], targets[i])
+            target = targets[i].to(pred_binary.device)
+            metrics = calculate_metrics(pred_probs[i], pred_binary[i], target)
             for key in all_metrics:
                 all_metrics[key].append(metrics[key])
 
