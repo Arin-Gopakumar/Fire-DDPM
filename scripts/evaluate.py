@@ -32,6 +32,7 @@ def setup_evaluation_logging(config):
     logging.info(f"Evaluation log will be saved to: {log_filename}")
     logging.info(f"Evaluation Configuration: {config}")
 
+# In scripts/evaluate.py
 def calculate_metrics(pred_probs, pred_binary, target_binary):
     """
     Calculates segmentation metrics for a single sample. This function is vital for your paper's results.
@@ -45,18 +46,22 @@ def calculate_metrics(pred_probs, pred_binary, target_binary):
     target_flat_binary = target_binary.flatten().cpu().numpy()
     pred_flat_probs = pred_probs.flatten().cpu().numpy()
 
-    if np.sum(target_flat_binary) == 0 and np.sum(pred_flat_binary) == 0:
-        return {'iou': 1.0, 'dice': 1.0, 'precision': 1.0, 'recall': 0.0, 'ap': 1.0}
+    # THIS IS THE KEY FIX: The special 'if' block for true negatives has been removed.
+    # The standard calculations below will now handle all cases.
+    # The precision_score and recall_score with zero_division=0 are robust to this case.
 
     intersection = (pred_binary * target_binary).sum().item()
     union = pred_binary.sum().item() + target_binary.sum().item() - intersection
 
+    # The small epsilon (1e-6) correctly handles the case where the union is 0 (a true negative), resulting in an IoU of 1.0.
     iou = (intersection + 1e-6) / (union + 1e-6)
     dice = (2. * intersection + 1e-6) / (pred_binary.sum().item() + target_binary.sum().item() + 1e-6)
 
+    # These functions will correctly return 0.0 for precision and recall in a true negative case.
     precision = precision_score(target_flat_binary, pred_flat_binary, zero_division=0)
     recall = recall_score(target_flat_binary, pred_flat_binary, zero_division=0)
 
+    # This correctly handles the average precision score when the target is empty.
     ap = average_precision_score(target_flat_binary, pred_flat_probs) if np.sum(target_flat_binary) > 0 else 0.0
 
     return {'iou': iou, 'dice': dice, 'precision': precision, 'recall': recall, 'ap': ap}
