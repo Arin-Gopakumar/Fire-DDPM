@@ -90,6 +90,7 @@ def collect_samples(fire_dir, k):
 #decided to split the data in this file HERE (so training / validation / test)
 # prepares data for one split
 #for each pair, you load and resize the tif stack, normalize if needed, save it as an .npy file, binarizes the mask file, and then finally saves it as a png
+# In scripts/prepare_data.py
 def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], norm: bool):
     if not fires:
         return
@@ -103,28 +104,23 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], no
             x = np.concatenate(arrs, 0)
             if norm:
                 x = normalize(x)
+            
+            # The input file is now saved regardless of the mask content.
             np.save(inp_dir/f"{sid}.npy", x)
 
-            # mask: try last band == binary else sibling _mask.tif
-            # this is what gpt said to have:
-                # Use the first band of the .tif file as the target mask.
-                # Skip the sample if the mask is completely empty (all zeros).
-                # Save both the input and target only if a valid mask is found.
-
+            # Read the mask
             mask = read_tif(mask_src)[0]
-            if mask.max() == 0:
-                continue  # skip if mask is completely empty
 
-            # Save input and target (now that we know the mask is valid)
-            np.save(inp_dir / f"{sid}.npy", x)
+            # THIS IS THE KEY FIX: The line that checked "if mask.max() == 0: continue" has been removed.
+            # We no longer skip samples with empty masks.
 
+            # Resize and binarize the mask
             mask = resize(mask[None], sz, nearest=True)[0]
             mask = (mask > 0).astype(np.uint8) * 255
 
-            np.save(tgt_dir / f"{sid}.npy", mask)
+            # Save the processed mask
             Image.fromarray(mask).save(tgt_dir / f"{sid}.png")
             total += 1
-            #this is the end of the gpt block
 
 
 #some parsing, had to ask gpt for some of this code in this function
