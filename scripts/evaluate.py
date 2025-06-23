@@ -1,5 +1,3 @@
-# In Fire-DDPM/scripts/evaluate.py
-
 import os
 import torch
 import numpy as np
@@ -7,8 +5,6 @@ import argparse
 import logging
 from tqdm import tqdm
 from sklearn.metrics import average_precision_score, precision_score, recall_score
-
-# This import structure works with your project layout
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -32,42 +28,29 @@ def setup_evaluation_logging(config):
     logging.info(f"Evaluation log will be saved to: {log_filename}")
     logging.info(f"Evaluation Configuration: {config}")
 
-# In scripts/evaluate.py
 def calculate_metrics(pred_probs, pred_binary, target_binary):
     """
-    Calculates segmentation metrics for a single sample. This function is vital for your paper's results.
-
-    Args:
-        pred_probs (torch.Tensor): The model's raw output probabilities, shape (H, W), values in [0, 1].
-        pred_binary (torch.Tensor): The binarized prediction mask {0, 1}.
-        target_binary (torch.Tensor): The ground truth mask {0, 1}.
+    Calculates segmentation metrics for a single sample.
     """
     pred_flat_binary = pred_binary.flatten().cpu().numpy()
     target_flat_binary = target_binary.flatten().cpu().numpy()
     pred_flat_probs = pred_probs.flatten().cpu().numpy()
 
-    # THIS IS THE KEY FIX: The special 'if' block for true negatives has been removed.
-    # The standard calculations below will now handle all cases.
-    # The precision_score and recall_score with zero_division=0 are robust to this case.
-
     intersection = (pred_binary * target_binary).sum().item()
     union = pred_binary.sum().item() + target_binary.sum().item() - intersection
 
-    # The small epsilon (1e-6) correctly handles the case where the union is 0 (a true negative), resulting in an IoU of 1.0.
     iou = (intersection + 1e-6) / (union + 1e-6)
     dice = (2. * intersection + 1e-6) / (pred_binary.sum().item() + target_binary.sum().item() + 1e-6)
 
-    # These functions will correctly return 0.0 for precision and recall in a true negative case.
     precision = precision_score(target_flat_binary, pred_flat_binary, zero_division=0)
     recall = recall_score(target_flat_binary, pred_flat_binary, zero_division=0)
 
-    # This correctly handles the average precision score when the target is empty.
     ap = average_precision_score(target_flat_binary, pred_flat_probs) if np.sum(target_flat_binary) > 0 else 0.0
 
     return {'iou': iou, 'dice': dice, 'precision': precision, 'recall': recall, 'ap': ap}
 
 def evaluate(config):
-    """Main evaluation function, designed to work with your project structure."""
+    """Main evaluation function, now with dual reporting."""
     setup_evaluation_logging(config)
     device = torch.device(config["device"])
 
@@ -108,6 +91,7 @@ def evaluate(config):
     logging.info(f"Found {len(test_dataset)} samples in the test set.")
 
     all_metrics = {'iou': [], 'dice': [], 'precision': [], 'recall': [], 'ap': []}
+    fire_positive_metrics = {'iou': [], 'dice': [], 'precision': [], 'recall': [], 'ap': []}
     progress_bar = tqdm(test_loader, desc="Evaluating on Test Set")
 
     for batch in progress_bar:
@@ -125,14 +109,35 @@ def evaluate(config):
         pred_binary = (pred_probs > 0.5).float()
 
         for i in range(len(conditions)):
-            target = targets[i].to(pred_binary.device)
-            metrics = calculate_metrics(pred_probs[i], pred_binary[i], target)
+            target_single = targets[i].to(pred_binary.device)
+            metrics = calculate_metrics(pred_probs[i], pred_binary[i], target_single)
+            
             for key in all_metrics:
                 all_metrics[key].append(metrics[key])
 
-    logging.info("\n" + "="*40)
-    logging.info("      FINAL EVALUATION REPORT      ")
-    logging.info("="*40)
+            if torch.sum(target_single) > 0:
+                for key in fire_positive_metrics:
+                    fire_positive_metrics[key].append(metrics[key])
+
+    logging.info("\n" + "="*50)
+    logging.info("      FINAL EVALUATION REPORT (FIRE-POSITIVE SAMPLES)      ")
+    logging.info("--- (This is the most important result) ---")
+    logging.info("="*50)
+    num_positive = len(fire_positive_metrics['iou'])
+    logging.info(f"Evaluated on {num_positive} / {len(test_dataset)} samples containing fire.")
+    for key, scores in fire_positive_metrics.items():
+        if scores:
+            mean_score = np.mean(scores)
+            std_score = np.std(scores)
+            logging.info(f"{key.upper():<18}: {mean_score:.4f} ± {std_score:.4f}")
+        else:
+            logging.info(f"{key.upper():<18}: No fire-positive samples found to score.")
+    logging.info("="*50)
+
+    logging.info("\n" + "="*50)
+    logging.info("        OVERALL EVALUATION REPORT (ALL SAMPLES)        ")
+    logging.info("--- (Includes 'no-fire' samples, may be inflated) ---")
+    logging.info("="*50)
     for key, scores in all_metrics.items():
         if scores:
             mean_score = np.mean(scores)
@@ -140,7 +145,7 @@ def evaluate(config):
             logging.info(f"{key.upper():<18}: {mean_score:.4f} ± {std_score:.4f}")
         else:
             logging.info(f"{key.upper():<18}: No valid samples to score.")
-    logging.info("="*40)
+    logging.info("="*50)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a trained Conditional DDPM for Wildfire Spread")
