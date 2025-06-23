@@ -57,10 +57,12 @@ def collect_samples(fire_dir, k):
     if len(tifs) < k + 1: return []
     return [(f"{fire_dir.name}_{date.search(past[-1].stem).group(1)}", past, tifs[idx + 1]) for idx, past in enumerate((tifs[i-k+1:i+1] for i in range(k-1, len(tifs)-1)), start=k-1)]
 
+# In scripts/prepare_data.py, replace the existing calculate_global_stats function with this one.
+
 def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int) -> Dict:
     """
     Calculates the min and max for each channel across the entire training dataset.
-    This is a two-pass operation: first determine number of channels, then calculate stats.
+    This version handles cases where a channel may have no valid data.
     """
     print("Calculating global normalization statistics from the training set...")
     # Get a sample to determine the number of channels
@@ -74,16 +76,26 @@ def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int)
 
     for fd in tqdm(fires, desc="Calculating Stats"):
         for _, imgs, _ in collect_samples(fd, k):
-            # We don't need to resize here, just stack and get stats
             try:
                 stacked_data = np.concatenate([read_tif(p) for p in imgs], 0)
                 if stacked_data.shape[0] != total_channels: continue
 
                 for i in range(total_channels):
-                    channel_mins[i] = min(channel_mins[i], stacked_data[i].min())
-                    channel_maxs[i] = max(channel_maxs[i], stacked_data[i].max())
+                    channel_mins[i] = min(channel_mins[i], np.min(stacked_data[i]))
+                    channel_maxs[i] = max(channel_maxs[i], np.max(stacked_data[i]))
             except Exception as e:
-                print(f"Skipping file during stat calculation due to error: {e}")
+                # This can happen if a .tif file is corrupt or has unexpected dimensions
+                # print(f"Skipping a file during stat calculation due to error: {e}")
+                pass
+
+    # --- THIS IS THE FIX ---
+    # After calculating, check for any remaining infinity values and replace them.
+    for i in range(total_channels):
+        if channel_mins[i] == np.inf or channel_maxs[i] == -np.inf:
+            print(f"Warning: No valid data found for channel {i}. Using 0.0 as the default min/max.")
+            channel_mins[i] = 0.0
+            channel_maxs[i] = 0.0
+    # --- END OF FIX ---
 
     return {"mins": channel_mins, "maxs": channel_maxs}
 
