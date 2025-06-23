@@ -62,7 +62,7 @@ def collect_samples(fire_dir, k):
 def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int) -> Dict:
     """
     Calculates the min and max for each channel across the entire training dataset.
-    This version handles cases where a channel may have no valid data.
+    This final version handles all numpy-to-json type conversion issues.
     """
     print("Calculating global normalization statistics from the training set...")
     # Get a sample to determine the number of channels
@@ -84,17 +84,19 @@ def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int)
                     channel_mins[i] = min(channel_mins[i], np.min(stacked_data[i]))
                     channel_maxs[i] = max(channel_maxs[i], np.max(stacked_data[i]))
             except Exception as e:
-                # This can happen if a .tif file is corrupt or has unexpected dimensions
-                # print(f"Skipping a file during stat calculation due to error: {e}")
                 pass
 
-    # --- THIS IS THE FIX ---
-    # After calculating, check for any remaining infinity values and replace them.
+    # First fix: Check for any remaining infinity values and replace them.
     for i in range(total_channels):
         if channel_mins[i] == np.inf or channel_maxs[i] == -np.inf:
             print(f"Warning: No valid data found for channel {i}. Using 0.0 as the default min/max.")
             channel_mins[i] = 0.0
             channel_maxs[i] = 0.0
+
+    # --- THIS IS THE NEW, DEFINITIVE FIX ---
+    # Convert all values from numpy types (e.g., np.float32) to native Python floats.
+    channel_mins = [float(v) for v in channel_mins]
+    channel_maxs = [float(v) for v in channel_maxs]
     # --- END OF FIX ---
 
     return {"mins": channel_mins, "maxs": channel_maxs}
