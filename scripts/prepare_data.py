@@ -33,18 +33,47 @@ def read_tif(p):
 
 def gather_fire_dirs(root: Path) -> Dict[str, List[Path]]:
     """
-    Gathers all fire directories and splits them into train, val, and test sets
-    based on a hash of the fire's directory name.
+    Return {"train": [...], "val": [...], "test": [...]} where each entry is a list
+    of *fire-event folders* (directories that contain all the day-*.tif files
+    for that fire).
+
+    Guarantee: **every fire folder appears in exactly one split**, so sliding
+    windows built with `k` past days cannot leak across splits.
+
+    Split rule
+    ----------
+    * Compute MD5(folder_name)  →  integer.
+    * train : hash % 10 in {0 … 7}
+    * val   : hash % 10 == 8
+    * test  : hash % 10 == 9
+
+    Because the hash depends only on the folder name, the split is:
+    • deterministic  ✦ reproducible across machines
+    • fire-level     ✦ no temporal leakage
     """
+
     fires = {"train": [], "val": [], "test": []}
-    all_fire_events = [fd for year_dir in root.glob("[12][0-9][0-9][0-9]") if year_dir.is_dir() for fd in year_dir.iterdir() if fd.is_dir()]
-    
-    for fd in sorted(all_fire_events):
-        hash_val = int(hashlib.md5(fd.name.encode()).hexdigest(), 16)
-        split = "train" if hash_val % 10 < 8 else ("val" if hash_val % 10 < 9 else "test")
+
+    # Walk every year folder (e.g. 2018/2019/…) then every fire dir inside it
+    fire_dirs = [
+        fd
+        for year_dir in root.glob("[12][0-9][0-9][0-9]")
+        if year_dir.is_dir()
+        for fd in year_dir.iterdir()
+        if fd.is_dir()
+    ]
+
+    for fd in sorted(fire_dirs):
+        h = int(hashlib.md5(fd.name.encode()).hexdigest(), 16)  # stable hash
+        split = "train" if h % 10 < 8 else ("val" if h % 10 == 8 else "test")
         fires[split].append(fd)
-        
-    print(f"Data split: {len(fires['train'])} train, {len(fires['val'])} val, {len(fires['test'])} test fire events.")
+
+    print(
+        f"Fire-level split: "
+        f"{len(fires['train'])} train  |  "
+        f"{len(fires['val'])} val  |  "
+        f"{len(fires['test'])} test fire events."
+    )
     return fires
 
 def sort_date_tifs(fire_dir):
@@ -133,7 +162,7 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], st
                 mask = read_tif(mask_src)[0]
                 mask = resize(mask[None], sz, nearest=True)[0]
                 mask = (mask > 0).astype(np.uint8) * 255
-                Image.fromarray(mask).save(tgt_dir / f"{sid}.png")
+                Image.fromarray(mask).save(tgt_dir / f"{sid}.npy")
                 total += 1
             except Exception as e:
                 print(f"Skipping sample {sid} due to error: {e}")
