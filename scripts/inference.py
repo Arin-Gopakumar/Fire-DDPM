@@ -6,6 +6,7 @@ from torchvision.utils import save_image
 import argparse
 import logging
 import math
+import glob
 
 # Adjust import paths
 import sys
@@ -17,8 +18,7 @@ from utils.dataset_loader import WildfireDataset # For potential input transform
 # --- Configuration for Inference ---
 INFERENCE_CONFIG = {
     "checkpoint_path": None, # REQUIRED: Path to the trained model checkpoint (.pt)
-    "condition_input_path": None, # REQUIRED: Path to a conditioning input .npy file
-    "output_dir": "../outputs/inference_results",
+    "output_base_dir": "../outputs/inference_results",
     "num_samples": 1, # Number of masks to generate for the given condition
     "image_size": 64, # Must match the trained model's image size
     "target_channels": 1,
@@ -35,18 +35,17 @@ INFERENCE_CONFIG = {
     "device": "cuda" if torch.cuda.is_available() else "cpu",
 }
 
-def setup_inference_logging(config):
-    os.makedirs(config["output_dir"], exist_ok=True)
+def setup_inference_logging(output_dir):
+    os.makedirs(output_dir, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
-            logging.FileHandler(os.path.join(config["output_dir"], "inference.log")),
+            logging.FileHandler(os.path.join(output_dir, "inference.log")),
             logging.StreamHandler(sys.stdout)
         ]
     )
-    logging.info(f"Inference logging setup complete. Log file: {os.path.join(config['output_dir'], 'inference.log')}")
-    logging.info(f"Inference Configuration: {config}")
+    logging.info(f"Inference logging setup complete. Log file: {os.path.join(output_dir, 'inference.log')}")
 
 
 def load_conditioning_input(path, image_size, device):
@@ -88,7 +87,17 @@ def load_conditioning_input(path, image_size, device):
         raise
 
 def run_inference(config):
-    setup_inference_logging(config)
+    # Determine the specific output directory for this input file # <--- ADD THESE TWO LINES
+    input_basename = os.path.splitext(os.path.basename(config["condition_input_path"]))[0] # <---
+    
+    current_output_dir = os.path.join(config["output_base_dir"], input_basename)
+    
+    # Setup logging for this specific run, creating a new log file per input # <--- ADD THIS LINE
+    setup_inference_logging(current_output_dir) # <--- CHANGE THIS LINE (setup_inference_logging(config) -> setup_inference_logging(current_output_dir))
+    logging.info(f"Inference Configuration for {input_basename}:") # <--- ADD THESE THREE LINES
+    for key, value in config.items(): # <---
+        logging.info(f"  {key}: {value}") # <---
+    
     device = torch.device(config["device"])
 
     if not config["checkpoint_path"] or not os.path.exists(config["checkpoint_path"]):
@@ -164,16 +173,17 @@ def run_inference(config):
     # generated_samples_binary = (generated_samples_01 > 0.5).float()
 
     # 5. Save Output
+    os.makedirs(current_output_dir, exist_ok=True) # <--- ADD THIS LINE TO ENSURE THE SPECIFIC FOLDER EXISTS
     output_basename = os.path.splitext(os.path.basename(config["condition_input_path"]))[0]
     for i in range(config["num_samples"]):
-        output_filename = os.path.join(config["output_dir"], f"predicted_mask_{output_basename}_sample{i:02d}.png")
+        output_filename = os.path.join(current_output_dir, f"predicted_mask_{output_basename}_sample{i:02d}.png") # <--- CHANGE THIS LINE (config["output_dir"] -> current_output_dir)
         save_image(generated_samples_01[i], output_filename)
         logging.info(f"Saved generated mask to {output_filename}")
 
     # Optionally save intermediate steps (gif or individual images)
     # For example, save the first sample's intermediates:
     if intermediate_steps and len(intermediate_steps) > 0:
-        intermediate_dir = os.path.join(config["output_dir"], f"intermediates_{output_basename}_sample00")
+        intermediate_dir = os.path.join(current_output_dir, f"intermediates_{output_basename}_sample00") # <--- CHANGE THIS LINE (config["output_dir"] -> current_output_dir)
         os.makedirs(intermediate_dir, exist_ok=True)
         logging.info(f"Saving intermediate steps to {intermediate_dir}...")
         for step_idx, step_img_scaled in enumerate(intermediate_steps):
@@ -182,8 +192,9 @@ def run_inference(config):
             save_image(step_img_01, os.path.join(intermediate_dir, f"step_{step_idx:04d}.png"))
         logging.info("Intermediate steps saved.")
 
-    logging.info("Inference finished.")
+    logging.info("Inference finished for this input file.")
 
+"""
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate Wildfire Spread Masks using a trained Conditional DDPM")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to the trained model checkpoint (.pt)")
@@ -204,3 +215,65 @@ if __name__ == "__main__":
     if args.condition_channels: INFERENCE_CONFIG["condition_channels"] = args.condition_channels # Allows override
 
     run_inference(INFERENCE_CONFIG)
+"""
+
+if __name__ == "__main__": #arguments made by gpt
+    parser = argparse.ArgumentParser(description="Generate Wildfire Spread Masks using a trained Conditional DDPM")
+    parser.add_argument("--checkpoint", type=str, required=True, help="Path to the trained model checkpoint (.pt)")
+    # Modify condition_input to not be required
+    parser.add_argument("--condition_input", type=str, help="Path to a single conditioning input .npy file") # <--- REMOVE 'required=True'
+    # Add new argument for directory
+    parser.add_argument("--condition_dir", type=str, help="Path to a directory containing multiple .npy conditioning input files for batch processing") # <--- ADD THIS LINE
+    
+    parser.add_argument("--output_dir", type=str, help="Base directory to save generated masks. Subfolders will be created for each input file.") # <--- CHANGE HELP TEXT
+    parser.add_argument("--num_samples", type=int, help="Number of masks to generate for the input")
+    parser.add_argument("--image_size", type=int, help="Image size (override if not in checkpoint config)")
+    parser.add_argument("--condition_channels", type=int, help="Condition channels (override if not in checkpoint config)")
+
+    args = parser.parse_args()
+
+    # Apply command line arguments to a temporary config
+    # We copy INFERENCE_CONFIG to avoid modifying the global default during batch processing
+    base_config = INFERENCE_CONFIG.copy() # <--- ADD THIS LINE
+    base_config["checkpoint_path"] = args.checkpoint # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+    
+    # Change output_dir to output_base_dir
+    if args.output_dir: base_config["output_base_dir"] = args.output_dir # <--- CHANGE THIS LINE (output_dir -> output_base_dir)
+    
+    if args.num_samples: base_config["num_samples"] = args.num_samples # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+    if args.image_size: base_config["image_size"] = args.image_size # Allows override # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+    if args.condition_channels: base_config["condition_channels"] = args.condition_channels # Allows override # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+
+    # --- ADD THE FOLLOWING NEW LOGIC BLOCK ---
+    if args.condition_dir:
+        if not os.path.isdir(args.condition_dir):
+            print(f"Error: Directory '{args.condition_dir}' not found.")
+            sys.exit(1)
+        
+        npy_files = sorted(glob.glob(os.path.join(args.condition_dir, "*.npy")))
+        if not npy_files:
+            print(f"No .npy files found in '{args.condition_dir}'. Exiting.")
+            sys.exit(0)
+
+        print(f"Found {len(npy_files)} .npy files in '{args.condition_dir}'. Starting batch inference.")
+        for i, npy_file_path in enumerate(npy_files):
+            print(f"\nProcessing file {i+1}/{len(npy_files)}: {os.path.basename(npy_file_path)}")
+            # Create a per-file config
+            current_config = base_config.copy()
+            current_config["condition_input_path"] = npy_file_path # Set the specific input path for this iteration
+            run_inference(current_config)
+
+    elif args.condition_input: # This is the original single-file processing logic
+        if not os.path.exists(args.condition_input):
+            print(f"Error: Conditioning input file '{args.condition_input}' not found.")
+            sys.exit(1)
+        
+        base_config["condition_input_path"] = args.condition_input # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+        print(f"Processing single file: {os.path.basename(args.condition_input)}")
+        run_inference(base_config) # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+    else:
+        parser.print_help()
+        print("\nError: Either --condition_input or --condition_dir must be provided.")
+        sys.exit(1)
+
+    print("\nAll inference tasks completed.") # <--- ADD THIS LINE

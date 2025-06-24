@@ -162,7 +162,7 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], st
                 mask = read_tif(mask_src)[0]
                 mask = resize(mask[None], sz, nearest=True)[0]
                 mask = (mask > 0).astype(np.uint8) * 255
-                Image.fromarray(mask).save(tgt_dir / f"{sid}.npy")
+                np.save(tgt_dir / f"{sid}.npy", mask)
                 total += 1
             except Exception as e:
                 print(f"Skipping sample {sid} due to error: {e}")

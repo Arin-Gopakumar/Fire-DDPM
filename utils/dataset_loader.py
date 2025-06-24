@@ -24,7 +24,7 @@ class WildfireDataset(Dataset):
         self.image_size = image_size
 
         self.input_files = sorted([f for f in os.listdir(self.inputs_dir) if f.endswith(".npy")])
-        self.target_files = sorted([f for f in os.listdir(self.targets_dir) if f.endswith(".png")])
+        self.target_files = sorted([f for f in os.listdir(self.targets_dir) if f.endswith(".npy")])
 
         # Basic check for consistency
         if len(self.input_files) != len(self.target_files):
@@ -107,10 +107,14 @@ class WildfireDataset(Dataset):
 
             # Load target fire mask (.png)
             # Expected: Grayscale, uint8. Will be converted to binary tensor [0,1] by target_transform
-            target_mask = Image.open(target_path).convert("L") # Convert to grayscale
+            target_mask = np.load(target_path).astype(np.float32)  # Load .npy
 
-            if self.target_transform:
-                target_mask = self.target_transform(target_mask)
+            # Binarize: assume mask is 0 or 255 and normalize to [0, 1]
+            target_mask = (target_mask > 0.5).astype(np.float32)
+
+            # Add channel dimension (1, H, W)
+            target_mask = torch.from_numpy(target_mask).unsqueeze(0)
+
 
             return {"condition": conditioning_input, "target": target_mask, "id": input_base}
         except Exception as e:
