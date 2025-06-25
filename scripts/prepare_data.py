@@ -30,7 +30,50 @@ def read_tif(p):
     """Reads a .tif file and returns its content as a numpy array."""
     with rasterio.open(p) as f:
         return f.read()
+        
+def gather_fire_dirs(root: Path) -> Dict[str, List[Path]]:
+    """
+    Return {"train": [...], "val": [...], "test": [...]} where each entry is a list
+    of *fire-event folders* (directories that contain all the day-*.tif files
+    for that fire).
 
+    This implementation uses a year-based split as requested:
+    * Train: All fire events from 2018 and 2019.
+    * Test: All fire events from 2020.
+    * Val: All fire events from 2021.
+    """
+    print("Gathering fire directories and splitting by year...")
+    fires = {"train": [], "val": [], "test": []}
+
+    # Find all year directories
+    year_dirs = [p for p in root.glob("[12][0-9][0-9][0-9]") if p.is_dir()]
+
+    for year_dir in sorted(year_dirs):
+        year = year_dir.name
+        fire_events_in_year = [fd for fd in year_dir.iterdir() if fd.is_dir()]
+
+        if year in ["2018", "2019"]:
+            print(f"Assigning {len(fire_events_in_year)} fire events from {year} to TRAIN set.")
+            fires["train"].extend(fire_events_in_year)
+        elif year == "2020":
+            print(f"Assigning {len(fire_events_in_year)} fire events from {year} to TEST set.")
+            fires["test"].extend(fire_events_in_year)
+        elif year == "2021":
+            print(f"Assigning {len(fire_events_in_year)} fire events from {year} to VAL set.")
+            fires["val"].extend(fire_events_in_year)
+        else:
+            print(f"Warning: Year {year} is present in the data but not assigned to a split. Skipping.")
+
+    print(
+        f"\nYear-based split complete: "
+        f"{len(fires['train'])} train  |  "
+        f"{len(fires['val'])} val  |  "
+        f"{len(fires['test'])} test fire events."
+    )
+    return fires
+
+
+'''
 def gather_fire_dirs(root: Path) -> Dict[str, List[Path]]:
     """
     Return {"train": [...], "val": [...], "test": [...]} where each entry is a list
@@ -75,6 +118,13 @@ def gather_fire_dirs(root: Path) -> Dict[str, List[Path]]:
         f"{len(fires['test'])} test fire events."
     )
     return fires
+'''
+
+
+
+
+
+
 
 def sort_date_tifs(fire_dir):
     """Sorts .tif files in a directory by date."""
