@@ -194,29 +194,6 @@ def run_inference(config):
 
     logging.info("Inference finished for this input file.")
 
-"""
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate Wildfire Spread Masks using a trained Conditional DDPM")
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to the trained model checkpoint (.pt)")
-    parser.add_argument("--condition_input", type=str, required=True, help="Path to the conditioning input .npy file")
-    parser.add_argument("--output_dir", type=str, help="Directory to save generated masks")
-    parser.add_argument("--num_samples", type=int, help="Number of masks to generate for the input")
-    parser.add_argument("--image_size", type=int, help="Image size (override if not in checkpoint config)")
-    parser.add_argument("--condition_channels", type=int, help="Condition channels (override if not in checkpoint config)")
-
-
-    args = parser.parse_args()
-
-    INFERENCE_CONFIG["checkpoint_path"] = args.checkpoint
-    INFERENCE_CONFIG["condition_input_path"] = args.condition_input
-    if args.output_dir: INFERENCE_CONFIG["output_dir"] = args.output_dir
-    if args.num_samples: INFERENCE_CONFIG["num_samples"] = args.num_samples
-    if args.image_size: INFERENCE_CONFIG["image_size"] = args.image_size # Allows override
-    if args.condition_channels: INFERENCE_CONFIG["condition_channels"] = args.condition_channels # Allows override
-
-    run_inference(INFERENCE_CONFIG)
-"""
-
 if __name__ == "__main__": #arguments made by gpt
     parser = argparse.ArgumentParser(description="Generate Wildfire Spread Masks using a trained Conditional DDPM")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to the trained model checkpoint (.pt)")
