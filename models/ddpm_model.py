@@ -214,8 +214,8 @@ class UNetConditional(nn.Module):
              # This is a basic resize, consider more sophisticated alignment if aspects differ
             context = F.interpolate(context, size=x_t.shape[2:], mode='bilinear', align_corners=False)
 
-        context = torch.nan_to_num(context, nan=0.0, posinf=0.0, neginf=0.0) #gpt fix
-        nn_input = torch.cat((x_t, context), dim=1) # (B, total_in_channels, H, W)
+        context = torch.nan_to_num(context, nan=0.0, posinf=0.0, neginf=0.0) # <--- ADD THIS
+        nn_input = torch.cat((x_t, context), dim=1)
 
         #print("1. nn_input:", torch.isnan(nn_input).any()) #gpt debug
 
@@ -440,49 +440,35 @@ class GaussianDiffusion(nn.Module):
         """
         Reverse diffusion process: p_theta(x_{t-1} | x_t)
         Samples x_{t-1} from x_t using the learned model to predict noise.
-        x_t: Current noisy image (B, C, H, W)
-        t: Current timestep (scalar tensor or int)
-        context: Conditioning data (B, C_cond, H, W)
-        t_index: integer index for t
+        This version uses a more stable formulation by first predicting x_0 and clipping it.
         """
-        betas_t = self._extract(1. / torch.sqrt(1. - self.betas), t, x_t.shape) # Mistake here, should be sqrt_recip_alphas_t
-        
-        # Corrected values from DDPM paper (Ho et al., 2020)
-        # betas_t, sqrt_one_minus_alphas_cumprod_t, sqrt_recip_alphas_t
-        # are used to get the predicted x_0 and then the mean of x_{t-1}
-
-        # Coefficients for Eq. (11) in DDPM paper:
-        # x_0_hat = (x_t - sqrt(1-alpha_cumprod_t) * eps_theta) / sqrt(alpha_cumprod_t)
+        # Get the numbers needed for the calculation
         sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, t, x_t.shape)
-        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape)
+        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod_t, t, x_t.shape)
         
-        # Model predicts noise (epsilon_theta)
+        # 1. Have the model predict the noise from the current fuzzy image
         predicted_noise = self.model(x_t, t, context)
-
-        # Estimate x_0 (according to Eq. 15 from DDPM paper, but using predicted noise directly)
-        # model_mean is derived from x_0_pred
-        # x_0_pred = (x_t - sqrt_one_minus_alphas_cumprod_t * predicted_noise) / sqrt_alphas_cumprod_t
-        # x_0_pred = torch.clamp(x_0_pred, -1., 1.) # Often clipped
-
-        # Calculate mean of p(x_{t-1} | x_t, x_0_pred) using Eq. (7) from DDPM paper
-        # posterior_mean = coef1 * x_0_pred + coef2 * x_t
+        
+        # 2. Use the noise to guess what the final, clean image (x_0) looks like
+        x_0_pred = (x_t - sqrt_one_minus_alphas_cumprod_t * predicted_noise) / sqrt_alphas_cumprod_t
+        
+        # 3. THIS IS THE FIX: Apply the "speed limiter".
+        #    Clip the guess to ensure its values stay in a safe [-1, 1] range.
+        x_0_pred = torch.clamp(x_0_pred, -1.0, 1.0)
+        
+        # 4. Now, use this safe, clipped guess to calculate the next, slightly-less-fuzzy image.
+        #    This calculation is now stable and won't produce infinite values.
         posterior_mean_coef1_t = self._extract(self.posterior_mean_coef1, t, x_t.shape)
         posterior_mean_coef2_t = self._extract(self.posterior_mean_coef2, t, x_t.shape)
-        
-        # An alternative and often used formulation for the mean (from Ho et al. eq. 11):
-        # (1/sqrt(alpha_t)) * (x_t - (beta_t / sqrt(1-alpha_cumprod_t)) * predicted_noise)
-        sqrt_recip_alphas_t = self._extract(torch.sqrt(1.0 / (1. - self.betas)), t, x_t.shape) # betas are 1-alphas
-        betas_t_val = self._extract(self.betas, t, x_t.shape)
-
-        model_mean = sqrt_recip_alphas_t * (x_t - betas_t_val * predicted_noise / sqrt_one_minus_alphas_cumprod_t)
-
-
-        if t_index == 0: # No noise added at the last step
+        model_mean = posterior_mean_coef1_t * x_0_pred + posterior_mean_coef2_t * x_t
+    
+        if t_index == 0:
+            # At the last step, we're done. No more noise.
             return model_mean
         else:
+            # For all other steps, add the correct, small amount of noise for the next step.
             posterior_log_variance_t = self._extract(self.posterior_log_variance_clipped, t, x_t.shape)
             noise = torch.randn_like(x_t)
-            # Algorithm 2 line 4:
             return model_mean + torch.exp(0.5 * posterior_log_variance_t) * noise
             
     @torch.no_grad()
