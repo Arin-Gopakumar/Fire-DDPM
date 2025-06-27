@@ -72,60 +72,6 @@ def gather_fire_dirs(root: Path) -> Dict[str, List[Path]]:
     )
     return fires
 
-
-'''
-def gather_fire_dirs(root: Path) -> Dict[str, List[Path]]:
-    """
-    Return {"train": [...], "val": [...], "test": [...]} where each entry is a list
-    of *fire-event folders* (directories that contain all the day-*.tif files
-    for that fire).
-
-    Guarantee: **every fire folder appears in exactly one split**, so sliding
-    windows built with `k` past days cannot leak across splits.
-
-    Split rule
-    ----------
-    * Compute MD5(folder_name)  →  integer.
-    * train : hash % 10 in {0 … 7}
-    * val   : hash % 10 == 8
-    * test  : hash % 10 == 9
-
-    Because the hash depends only on the folder name, the split is:
-    • deterministic  ✦ reproducible across machines
-    • fire-level     ✦ no temporal leakage
-    """
-
-    fires = {"train": [], "val": [], "test": []}
-
-    # Walk every year folder (e.g. 2018/2019/…) then every fire dir inside it
-    fire_dirs = [
-        fd
-        for year_dir in root.glob("[12][0-9][0-9][0-9]")
-        if year_dir.is_dir()
-        for fd in year_dir.iterdir()
-        if fd.is_dir()
-    ]
-
-    for fd in sorted(fire_dirs):
-        h = int(hashlib.md5(fd.name.encode()).hexdigest(), 16)  # stable hash
-        split = "train" if h % 10 < 8 else ("val" if h % 10 == 8 else "test")
-        fires[split].append(fd)
-
-    print(
-        f"Fire-level split: "
-        f"{len(fires['train'])} train  |  "
-        f"{len(fires['val'])} val  |  "
-        f"{len(fires['test'])} test fire events."
-    )
-    return fires
-'''
-
-
-
-
-
-
-
 def sort_date_tifs(fire_dir):
     """Sorts .tif files in a directory by date."""
     return sorted([p for p in fire_dir.glob("*.tif") if date.search(p.stem)], key=lambda p: date.search(p.stem).group(1))
