@@ -30,7 +30,7 @@ INFERENCE_CONFIG = {
     "channel_mult": (1, 2, 4, 8),
     "time_emb_dim_mult": 4,
     "unet_groups": 8,
-    "diffusion_timesteps": 1000,
+    "diffusion_timesteps": 20,
     "beta_schedule": "linear",
     "device": "cuda" if torch.cuda.is_available() else "cpu",
 }

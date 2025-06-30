@@ -333,7 +333,7 @@ class GaussianDiffusion(nn.Module):
     Gaussian Diffusion process for DDPM.
     Handles noise scheduling, forward diffusion (q_sample), and reverse denoising (p_sample).
     """
-    def __init__(self, model, image_size, timesteps=1000, beta_schedule_type='linear',
+    def __init__(self, model, image_size, timesteps=20, beta_schedule_type='linear',
                  target_channels=1, device='cpu'):
         super().__init__()
         self.model = model # The UNet model
@@ -444,7 +444,7 @@ class GaussianDiffusion(nn.Module):
         """
         # Get the numbers needed for the calculation
         sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, t, x_t.shape)
-        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod_t, t, x_t.shape)
+        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape)
         
         # 1. Have the model predict the noise from the current fuzzy image
         predicted_noise = self.model(x_t, t, context)
@@ -485,6 +485,6 @@ class GaussianDiffusion(nn.Module):
         for i in reversed(range(0, self.timesteps)):
             t_tensor = torch.full((batch_size,), i, device=self.device, dtype=torch.long)
             img = self.p_sample(img, t_tensor, context, i)
-            if i % (self.timesteps // 10) == 0 or i < 10: # Save some intermediate steps
-                imgs.append(img.cpu())
+            #if i % (self.timesteps // 10) == 0 or i < 10: # Save some intermediate steps
+            imgs.append(img.cpu())
         return img.cpu(), imgs # Return final image and intermediate steps
