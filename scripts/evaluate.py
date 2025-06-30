@@ -73,20 +73,20 @@ def evaluate(config):
     # --- NEW: Initialize torchmetrics objects ---
     # Metrics for all samples
     metrics_all = torchmetrics.MetricCollection({
-        'AP': torchmetrics.classification.BinaryAveragePrecision(),
-        'Precision': torchmetrics.classification.BinaryPrecision(),
-        'Recall': torchmetrics.classification.BinaryRecall(),
-        'IoU': torchmetrics.classification.BinaryJaccardIndex(),
-        'Dice': torchmetrics.Dice()
+        'AP': torchmetrics.AveragePrecision(task="binary"),
+        'Precision': torchmetrics.Precision(task="binary"),
+        'Recall': torchmetrics.Recall(task="binary"),
+        'IoU': torchmetrics.JaccardIndex(task="binary"),
+        'Dice': torchmetrics.Dice(task="binary")
     }).to(device)
 
     # Metrics for samples that contain fire
     metrics_positive = torchmetrics.MetricCollection({
-        'AP': torchmetrics.classification.BinaryAveragePrecision(),
-        'Precision': torchmetrics.classification.BinaryPrecision(),
-        'Recall': torchmetrics.classification.BinaryRecall(),
-        'IoU': torchmetrics.classification.BinaryJaccardIndex(),
-        'Dice': torchmetrics.Dice()
+        'AP': torchmetrics.AveragePrecision(task="binary"),
+        'Precision': torchmetrics.Precision(task="binary"),
+        'Recall': torchmetrics.Recall(task="binary"),
+        'IoU': torchmetrics.JaccardIndex(task="binary"),
+        'Dice': torchmetrics.Dice(task="binary")
     }).to(device)
     
     num_positive_samples = 0
