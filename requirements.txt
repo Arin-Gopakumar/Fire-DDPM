@@ -4,6 +4,7 @@ torch
 torchvision
 numpy
 Pillow
+torchmetrics
 
 # Image processing
 scikit-image
