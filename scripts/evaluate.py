@@ -57,7 +57,7 @@ def evaluate(config):
     diffusion_process = GaussianDiffusion(
         model=unet_model,
         image_size=model_config.get("image_size", 64),
-        timesteps=model_config.get("diffusion_timesteps", 1000),
+        timesteps=model_config.get("diffusion_timesteps", 20),
         device=device
     )
 
