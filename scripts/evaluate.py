@@ -4,8 +4,8 @@ import numpy as np
 import argparse
 import logging
 from tqdm import tqdm
-from sklearn.metrics import average_precision_score, precision_score, recall_score
 import sys
+import torchmetrics
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.ddpm_model import UNetConditional, GaussianDiffusion
@@ -28,29 +28,9 @@ def setup_evaluation_logging(config):
     logging.info(f"Evaluation log will be saved to: {log_filename}")
     logging.info(f"Evaluation Configuration: {config}")
 
-def calculate_metrics(pred_probs, pred_binary, target_binary):
-    """
-    Calculates segmentation metrics for a single sample.
-    """
-    pred_flat_binary = pred_binary.flatten().cpu().numpy()
-    target_flat_binary = target_binary.flatten().cpu().numpy()
-    pred_flat_probs = pred_probs.flatten().cpu().numpy()
-
-    intersection = (pred_binary * target_binary).sum().item()
-    union = pred_binary.sum().item() + target_binary.sum().item() - intersection
-
-    iou = (intersection + 1e-6) / (union + 1e-6)
-    dice = (2. * intersection + 1e-6) / (pred_binary.sum().item() + target_binary.sum().item() + 1e-6)
-
-    precision = precision_score(target_flat_binary, pred_flat_binary, zero_division=0)
-    recall = recall_score(target_flat_binary, pred_flat_binary, zero_division=0)
-
-    ap = average_precision_score(target_flat_binary, pred_flat_probs) if np.sum(target_flat_binary) > 0 else 0.0
-
-    return {'iou': iou, 'dice': dice, 'precision': precision, 'recall': recall, 'ap': ap}
 
 def evaluate(config):
-    """Main evaluation function, now with dual reporting."""
+    """Main evaluation function, rewritten to use torchmetrics for better accuracy."""
     setup_evaluation_logging(config)
     device = torch.device(config["device"])
 
@@ -90,62 +70,85 @@ def evaluate(config):
         return
     logging.info(f"Found {len(test_dataset)} samples in the test set.")
 
-    all_metrics = {'iou': [], 'dice': [], 'precision': [], 'recall': [], 'ap': []}
-    fire_positive_metrics = {'iou': [], 'dice': [], 'precision': [], 'recall': [], 'ap': []}
+    # --- NEW: Initialize torchmetrics objects ---
+    # Metrics for all samples
+    metrics_all = torchmetrics.MetricCollection({
+        'AP': torchmetrics.classification.BinaryAveragePrecision(),
+        'Precision': torchmetrics.classification.BinaryPrecision(),
+        'Recall': torchmetrics.classification.BinaryRecall(),
+        'IoU': torchmetrics.classification.BinaryJaccardIndex(),
+        'Dice': torchmetrics.Dice()
+    }).to(device)
+
+    # Metrics for samples that contain fire
+    metrics_positive = torchmetrics.MetricCollection({
+        'AP': torchmetrics.classification.BinaryAveragePrecision(),
+        'Precision': torchmetrics.classification.BinaryPrecision(),
+        'Recall': torchmetrics.classification.BinaryRecall(),
+        'IoU': torchmetrics.classification.BinaryJaccardIndex(),
+        'Dice': torchmetrics.Dice()
+    }).to(device)
+    
+    num_positive_samples = 0
+    # --- End of new initialization ---
+
     progress_bar = tqdm(test_loader, desc="Evaluating on Test Set")
 
     for batch in progress_bar:
         conditions = batch["condition"].to(device)
-        targets = batch["target"].to(device)
+        targets = batch["target"].to(device) # Shape: (B, 1, H, W), values are 0 or 1
 
         with torch.no_grad():
             generated_samples_scaled, _ = diffusion_process.sample(context=conditions, batch_size=conditions.shape[0])
 
         if torch.isnan(generated_samples_scaled).any():
-            logging.warning(f"NaN value detected in model output for a sample in this batch. Skipping batch.")
+            logging.warning("NaN value detected in model output for a sample in this batch. Skipping batch.")
             continue
+        
+        # pred_probs are the heatmaps, used for Average Precision
+        pred_probs = (generated_samples_scaled.to(device) + 1) / 2.0 # Shape: (B, 1, H, W), values are [0,1]
+        # pred_binary is the binarized output, used for other metrics
+        pred_binary = (pred_probs > 0.5).int()
+        targets_int = targets.int()
 
-        pred_probs = (generated_samples_scaled.cpu() + 1) / 2.0
-        pred_binary = (pred_probs > 0.5).float()
+        # --- NEW: Update metrics using torchmetrics ---
+        # Flatten spatial dimensions to treat each pixel as a sample
+        flat_preds_prob = pred_probs.flatten()
+        flat_preds_binary = pred_binary.flatten()
+        flat_targets = targets_int.flatten()
+        
+        # Update metrics for all samples
+        metrics_all.update(flat_preds_prob, flat_targets)
 
-        for i in range(len(conditions)):
-            target_single = targets[i].to(pred_binary.device)
-            metrics = calculate_metrics(pred_probs[i], pred_binary[i], target_single)
-            
-            for key in all_metrics:
-                all_metrics[key].append(metrics[key])
+        # Update metrics for fire-positive samples only
+        for i in range(targets.shape[0]):
+            if torch.sum(targets[i]) > 0:
+                num_positive_samples += 1
+                positive_preds_prob_flat = pred_probs[i].flatten()
+                positive_preds_binary_flat = pred_binary[i].flatten()
+                positive_targets_flat = targets_int[i].flatten()
+                metrics_positive.update(positive_preds_prob_flat, positive_targets_flat)
+        # --- End of new metric update logic ---
 
-            if torch.sum(target_single) > 0:
-                for key in fire_positive_metrics:
-                    fire_positive_metrics[key].append(metrics[key])
-
-    logging.info("\n" + "="*50)
-    logging.info("      FINAL EVALUATION REPORT (FIRE-POSITIVE SAMPLES)      ")
-    logging.info("--- (This is the most important result) ---")
-    logging.info("="*50)
-    num_positive = len(fire_positive_metrics['iou'])
-    logging.info(f"Evaluated on {num_positive} / {len(test_dataset)} samples containing fire.")
-    for key, scores in fire_positive_metrics.items():
-        if scores:
-            mean_score = np.mean(scores)
-            std_score = np.std(scores)
-            logging.info(f"{key.upper():<18}: {mean_score:.4f} ± {std_score:.4f}")
+    def log_metric_report(title, metrics_collection, num_samples, total_samples):
+        logging.info("\n" + "="*50)
+        logging.info(f"      {title}      ")
+        logging.info("="*50)
+        
+        # Compute final metrics from the aggregated state
+        final_metrics = metrics_collection.compute()
+        
+        if num_samples > 0:
+            logging.info(f"Evaluated on {num_samples} / {total_samples} samples.")
+            for key, score in final_metrics.items():
+                logging.info(f"{key:<18}: {score.item():.4f}")
         else:
-            logging.info(f"{key.upper():<18}: No fire-positive samples found to score.")
-    logging.info("="*50)
+            logging.info(f"No samples found for this category.")
+        logging.info("="*50)
 
-    logging.info("\n" + "="*50)
-    logging.info("        OVERALL EVALUATION REPORT (ALL SAMPLES)        ")
-    logging.info("--- (Includes 'no-fire' samples, may be inflated) ---")
-    logging.info("="*50)
-    for key, scores in all_metrics.items():
-        if scores:
-            mean_score = np.mean(scores)
-            std_score = np.std(scores)
-            logging.info(f"{key.upper():<18}: {mean_score:.4f} ± {std_score:.4f}")
-        else:
-            logging.info(f"{key.upper():<18}: No valid samples to score.")
-    logging.info("="*50)
+    # Log reports
+    log_metric_report("FINAL EVALUATION REPORT (FIRE-POSITIVE SAMPLES)", metrics_positive, num_positive_samples, len(test_dataset))
+    log_metric_report("OVERALL EVALUATION REPORT (ALL SAMPLES)", metrics_all, len(test_dataset), len(test_dataset))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a trained Conditional DDPM for Wildfire Spread")
