@@ -35,7 +35,7 @@ CONFIG = {
     "channel_mult": (1, 2, 4, 8), # For UNet depth
     "time_emb_dim_mult": 4,
     "unet_groups": 8, # GroupNorm groups
-    "diffusion_timesteps": 1000,
+    "diffusion_timesteps": 20,
     "beta_schedule": "linear", # 'linear' or 'cosine'
     "save_every_n_epochs": 10, # How often to save checkpoints
     "sample_every_n_epochs": 5, # How often to generate and save sample images
