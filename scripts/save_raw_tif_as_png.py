@@ -24,20 +24,22 @@ def save_tif_band_as_png(tif_path, output_png_path, band_index=0, scale_to_255=T
             print(f"Mean Value: {np.mean(data):.4f}")
             # Print a small slice of the data (e.g., top-left corner)
             print("Top-left 5x5 pixel values:")
-            print(data[:5, :5])
+            print(data)
             print("--------------------------------------------------")
             # --- END NEW ---
 
             # Normalize and scale to 0-255 for visualization
             if scale_to_255:
+                print("scale to 255")
                 # Handle potential non-binary data (e.g., timestamps)
                 # If it's a binary mask (0 or non-zero for fire), simply binarize and scale
                 if np.max(data) > 0: # Avoid division by zero if all pixels are 0
                     # Simple binarization: anything > 0 is fire
+                    print(np.max(data))
                     data = (data > 0).astype(np.uint8) * 255
                 else:
                     data = np.zeros_like(data, dtype=np.uint8) # All black if no fire
-            
+                    print("else")
             # Ensure it's uint8 for PIL
             img_array = data.astype(np.uint8)
             
@@ -49,6 +51,7 @@ def save_tif_band_as_png(tif_path, output_png_path, band_index=0, scale_to_255=T
         print(f"Error processing {tif_path}: {e}")
 
 if __name__ == "__main__":
+    print("name = main")
     # --- Define paths ---
     # Get the parent directory of the current working directory (which is /workspace/ in your case)
     # Assuming you run this script from /workspace/Fire-DDPM/
