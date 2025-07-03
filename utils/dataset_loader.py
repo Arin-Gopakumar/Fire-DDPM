@@ -209,19 +209,19 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 class WildfireDataset(Dataset):
-    """
-    Custom Dataset for loading wildfire conditioning inputs and target masks.
-    Assumes conditioning inputs are .npy files and targets are .png files.
-    """
+"""
+    #Custom Dataset for loading wildfire conditioning inputs and target masks.
+    #Assumes conditioning inputs are .npy files and targets are .png files.
+"""
     def __init__(self, data_dir, split="train", image_size=(64,64), target_transform=None, input_transform=None):
         """
-        Args:
-            data_dir (str): Path to the base data directory (e.g., "../data").
-            split (str): "train", "val", or "test".
-            image_size (tuple): Target (H,W) for images.
-            target_transform (callable, optional): Optional transform to be applied on a target.
-            input_transform (callable, optional): Optional transform to be applied on an input.
-        """
+        #Args:
+            #data_dir (str): Path to the base data directory (e.g., "../data").
+            #split (str): "train", "val", or "test".
+            #image_size (tuple): Target (H,W) for images.
+            #target_transform (callable, optional): Optional transform to be applied on a target.
+            #input_transform (callable, optional): Optional transform to be applied on an input.
+"""
         self.inputs_dir = os.path.join(data_dir, split, "inputs")
         self.targets_dir = os.path.join(data_dir, split, "targets")
         self.image_size = image_size
