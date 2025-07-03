@@ -250,7 +250,7 @@ from tqdm import tqdm
 date = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
 def resize(img, shape, nearest=False):
-    """Resizes an image (numpy array) to a new shape."""
+    #Resizes an image (numpy array) to a new shape.
     res = np.empty((img.shape[0], *shape), dtype=img.dtype)
     for i in range(img.shape[0]):
         im = Image.fromarray(img[i])
@@ -259,21 +259,21 @@ def resize(img, shape, nearest=False):
     return res
 
 def read_tif(p):
-    """Reads a .tif file and returns its content as a numpy array."""
+    #Reads a .tif file and returns its content as a numpy array.
     with rasterio.open(p) as f:
         return f.read()
         
 def gather_fire_dirs(root: Path) -> Dict[str, List[Path]]:
     """
-    Return {"train": [...], "val": [...], "test": [...]} where each entry is a list
-    of *fire-event folders* (directories that contain all the day-*.tif files
-    for that fire).
+   #Return {"train": [...], "val": [...], "test": [...]} where each entry is a list
+   # of *fire-event folders* (directories that contain all the day-*.tif files
+    #for that fire).
 
-    This implementation uses a year-based split as requested:
-    * Train: All fire events from 2018 and 2019.
-    * Test: All fire events from 2020.
-    * Val: All fire events from 2021.
-    """
+    #This implementation uses a year-based split as requested:
+    #* Train: All fire events from 2018 and 2019.
+    #* Test: All fire events from 2020.
+    #* Val: All fire events from 2021.
+"""
     print("Gathering fire directories and splitting by year...")
     fires = {"train": [], "val": [], "test": []}
 
@@ -305,11 +305,11 @@ def gather_fire_dirs(root: Path) -> Dict[str, List[Path]]:
     return fires
 
 def sort_date_tifs(fire_dir):
-    """Sorts .tif files in a directory by date."""
+    #Sorts .tif files in a directory by date.
     return sorted([p for p in fire_dir.glob("*.tif") if date.search(p.stem)], key=lambda p: date.search(p.stem).group(1))
 
 def collect_samples(fire_dir, k):
-    """Creates input/target samples of k days from a single fire event."""
+    #Creates input/target samples of k days from a single fire event.
     tifs = sort_date_tifs(fire_dir)
     if len(tifs) < k + 1: return []
     return [(f"{fire_dir.name}_{date.search(past[-1].stem).group(1)}", past, tifs[idx + 1]) for idx, past in enumerate((tifs[i-k+1:i+1] for i in range(k-1, len(tifs)-1)), start=k-1)]
@@ -317,10 +317,10 @@ def collect_samples(fire_dir, k):
 # In scripts/prepare_data.py, replace the existing calculate_global_stats function with this one.
 
 def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int) -> Dict:
-    """
-    Calculates the min and max for each channel across the entire training dataset.
-    This final version handles all numpy-to-json type conversion issues.
-    """
+    
+    #Calculates the min and max for each channel across the entire training dataset.
+    #This final version handles all numpy-to-json type conversion issues.
+    
     print("Calculating global normalization statistics from the training set...")
     # Get a sample to determine the number of channels
     first_sample_path = sort_date_tifs(fires[0])[0]
@@ -359,7 +359,7 @@ def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int)
     return {"mins": channel_mins, "maxs": channel_maxs}
 
 def normalize_globally(x, stats):
-    """Normalizes each channel of a numpy array to [-1, 1] using pre-computed global stats."""
+    #Normalizes each channel of a numpy array to [-1, 1] using pre-computed global stats.
     x = x.astype(np.float32)
     mins, maxs = stats["mins"], stats["maxs"]
     for i in range(x.shape[0]):
@@ -371,7 +371,7 @@ def normalize_globally(x, stats):
     return x
 
 def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], stats: Dict):
-    """Processes and saves the data for one split using global normalization stats."""
+    #Processes and saves the data for one split using global normalization stats.
     if not fires: return
     inp_dir, tgt_dir = out/split/"inputs", out/split/"targets"
     inp_dir.mkdir(parents=True, exist_ok=True); tgt_dir.mkdir(parents=True, exist_ok=True)
