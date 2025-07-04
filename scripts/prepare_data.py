@@ -19,6 +19,45 @@ from datetime import datetime, timedelta # Import for date manipulation
 # Regular expression to find a date pattern like "2019-04-19"
 date = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
+def save_tif_band_as_png(tif_path, output_png_path):
+    """
+    Loads a specific band from a TIFF file, scales it to 0-255, and saves as PNG.
+    Also prints basic statistics and generates a histogram of the raw data.
+    """
+    try:
+        with rasterio.open(tif_path) as src:
+            # Read the specified band (rasterio bands are 1-indexed)
+            data = src.read(23) 
+            data_new = data.flatten()
+            data_new.sort()
+            data_sorted = data_new[::-1]
+            count = 0
+            for row_idx in range(data.shape[0]): # Iterate up to 5 rows or max rows
+                for col_idx in range(data.shape[1]): # Iterate up to 5 columns or max cols
+                    pixel_value = data[row_idx, col_idx]
+                    if math.isnan(pixel_value):
+                        count += 1
+                        pixel_value = 2550
+                    data[row_idx, col_idx] = pixel_value
+            data_new = data.flatten()
+            mean = np.mean(data)
+            std = np.std(data)
+            # --- Print raw data statistics ---
+            print(f"\n--- Raw Data Stats for {os.path.basename(tif_path)} (Band {band_index + 1}) ---")
+            print(f"Shape: {data.shape}")
+            print(f"Data Type: {data.dtype}")
+            print(f"Min Value: {np.min(data)}")
+            print(f"Max Value: {np.max(data)}")
+            print(f"10th Max Value: {np.partition(data.flatten(), -10)[-10]}")
+            print(f"Mean Value: {np.mean(data):.4f}")
+            print(f"Standard Deviation value: {np.std(data)}")
+            print(f"--- Iterating through top-left 5x5 pixels of {os.path.basename(tif_path)} ---")
+            img_array = data.astype(np.uint8)
+            img = Image.fromarray(img_array, mode='L')
+            img.save(output_png_path)
+            print(f"Saved {output_png_path}")
+    except Exception as e:
+        print(f"Error processing {tif_path}: {e}")
 def resize(img, shape, nearest=False):
     """Resizes an image (numpy array) to a new shape."""
     res = np.empty((img.shape[0], *shape), dtype=img.dtype)
@@ -183,7 +222,7 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], st
 
                 mask = read_tif(mask_src)[0] # This is the (k+1)-th day's data (Day N+1)
                 mask = resize(mask[None], sz, nearest=True)[0]
-                mask = (mask > 0).astype(np.uint8) * 255 # Binarize and scale to 0/255 for consistency
+                save_tif_band_as_png(inp_dir, tgt_dir)
                 np.save(tgt_dir / f"{target_sid}.npy", mask) # Save target with its OWN sid (Day N+1's date)
                 total += 1
             except Exception as e:

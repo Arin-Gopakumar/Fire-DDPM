@@ -5,6 +5,7 @@ import numpy as np
 import os
 from pathlib import Path
 import matplotlib.pyplot as plt # Added for plotting
+import math
 
 def save_tif_band_as_png(tif_path, output_png_path, band_index=0, scale_to_255=True):
     """
@@ -14,8 +15,27 @@ def save_tif_band_as_png(tif_path, output_png_path, band_index=0, scale_to_255=T
     try:
         with rasterio.open(tif_path) as src:
             # Read the specified band (rasterio bands are 1-indexed)
-            data = src.read(band_index + 1) 
+            data = src.read(23) 
             
+            data_new = data.flatten()
+            data_new.sort()
+            data_sorted = data_new[::-1]
+            
+            
+            count = 0
+            for row_idx in range(data.shape[0]): # Iterate up to 5 rows or max rows
+                for col_idx in range(data.shape[1]): # Iterate up to 5 columns or max cols
+                    pixel_value = data[row_idx, col_idx]
+                   
+                    
+                    if math.isnan(pixel_value):
+                        count += 1
+                        pixel_value = 2550
+                    data[row_idx, col_idx] = pixel_value
+            
+            data_new = data.flatten()
+            mean = np.mean(data)
+            std = np.std(data)
             # --- Print raw data statistics ---
             print(f"\n--- Raw Data Stats for {os.path.basename(tif_path)} (Band {band_index + 1}) ---")
             print(f"Shape: {data.shape}")
@@ -25,28 +45,9 @@ def save_tif_band_as_png(tif_path, output_png_path, band_index=0, scale_to_255=T
             print(f"10th Max Value: {np.partition(data.flatten(), -10)[-10]}")
             print(f"Mean Value: {np.mean(data):.4f}")
             print(f"Standard Deviation value: {np.std(data)}")
-            data_new = data.flatten()
-            data_new.sort()
-            data_sorted = data_new[::-1]
-            print(data_sorted[:485])
-            print(len(data_new))
-            # Print a small slice of the data (e.g., top-left corner)
-            print("Top-left 5x5 pixel values:")
-            print(data[:5, :5])
-            print("--------------------------------------------------")
             print(f"--- Iterating through top-left 5x5 pixels of {os.path.basename(tif_path)} ---")
-            mean = np.mean(data)
-            std = np.std(data)
-            for row_idx in range(data.shape[0]): # Iterate up to 5 rows or max rows
-                for col_idx in range(data.shape[1]): # Iterate up to 5 columns or max cols
-                    pixel_value = data[row_idx, col_idx]
-                    z_score = (pixel_value - mean)/std
-                    if pixel_value > 2359:
-                        pixel_value = 255
-                    else: 
-                        pixel_value = 0
-                    data[row_idx, col_idx] = pixel_value
-
+            #print(data_new[:485])
+            
             # --- NEW: Generate and save histogram ---
             try:
                 flat_data = data.flatten()
@@ -88,7 +89,6 @@ if __name__ == "__main__":
 
     # Path to the raw target .tif file that corresponds to the all-white target you saw
     # This is the target for Day N+1
-    raw_target_tif_file = "/workspace/WildfireSpreadTS_Data/2019/fire_22938749/2019-06-06.tif" 
     
     # Path to the raw input .tif file for the day before (Day N)
     raw_input_tif_file = "/workspace/WildfireSpreadTS_Data/2019/fire_22938749/2019-06-07.tif"
@@ -116,7 +116,7 @@ if __name__ == "__main__":
     raw_input_tif_file11 = "/workspace/WildfireSpreadTS_Data/2019/fire_22938749/2019-06-18.tif"
     
     # Output paths for the PNGs within your project's outputs folder
-    output_target_png_file = output_viz_dir / "raw_target_fire_2019-06-06.png"
+
     output_input_png_file = output_viz_dir / "raw_input_fire_2019-06-07.png"
     output_input_png_file1 = output_viz_dir / "raw_target_fire_2019-06-08.png"
     output_input_png_file2= output_viz_dir / "raw_input_fire_2019-06-09.png"
@@ -130,8 +130,8 @@ if __name__ == "__main__":
     output_input_png_file10 = output_viz_dir / "raw_input_fire_2019-06-17.png"
     output_input_png_file11 = output_viz_dir / "raw_target_fire_2019-06-18.png"
 
-    print(f"Attempting to save raw target TIFF: {raw_target_tif_file}")
-    save_tif_band_as_png(raw_target_tif_file, output_target_png_file, band_index=0, scale_to_255=True)
+    print(f"Attempting to save raw input TIFF: {raw_input_tif_file}")
+    save_tif_band_as_png(raw_input_tif_file, output_input_png_file, band_index=0, scale_to_255=True)
 
     print(f"Attempting to save raw input TIFF: {raw_input_tif_file1}")
     save_tif_band_as_png(raw_input_tif_file1, output_input_png_file1, band_index=0, scale_to_255=True)
