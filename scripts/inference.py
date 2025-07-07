@@ -169,15 +169,20 @@ def run_inference(config):
     generated_samples_01 = (generated_samples_scaled + 1) / 2.0
     generated_samples_01 = torch.clamp(generated_samples_01, 0.0, 1.0)
     
-    # Optionally binarize the output further if needed (e.g., threshold at 0.5)
-    # generated_samples_binary = (generated_samples_01 > 0.5).float()
+    # --- NEW: Binarize the output for saving ---
+    # Assuming the model outputs high probabilities for the positive class (which is 0.0 in your targets)
+    # So, if model_output > 0.5, it predicts the positive class (fire).
+    # We want fire to be 2550 (e.g., for one class) and no-fire to be 0 (for the other class) for visualization.
+    generated_samples_binary = (generated_samples_01 > 0.5).float()
+    # --- END NEW ---
 
     # 5. Save Output
     os.makedirs(current_output_dir, exist_ok=True) # <--- ADD THIS LINE TO ENSURE THE SPECIFIC FOLDER EXISTS
     output_basename = os.path.splitext(os.path.basename(config["condition_input_path"]))[0]
     for i in range(config["num_samples"]):
         output_filename = os.path.join(current_output_dir, f"predicted_mask_{output_basename}_sample{i:02d}.png") # <--- CHANGE THIS LINE (config["output_dir"] -> current_output_dir)
-        save_image(generated_samples_01[i], output_filename)
+        #save_image(generated_samples_01[i], output_filename)
+        save_image(generated_samples_binary[i] * 2550, output_filename)
         logging.info(f"Saved generated mask to {output_filename}")
 
     # Optionally save intermediate steps (gif or individual images)
@@ -189,7 +194,8 @@ def run_inference(config):
         for step_idx, step_img_scaled in enumerate(intermediate_steps):
             step_img_01 = (step_img_scaled[0] + 1) / 2.0 # Taking the first sample from batch
             step_img_01 = torch.clamp(step_img_01, 0.0, 1.0)
-            save_image(step_img_01, os.path.join(intermediate_dir, f"step_{step_idx:04d}.png"))
+            #save_image(step_img_01, os.path.join(intermediate_dir, f"step_{step_idx:04d}.png"))
+            save_image(step_img_01 * 2550, os.path.join(intermediate_dir, f"step_{step_idx:04d}.png"))
         logging.info("Intermediate steps saved.")
 
     logging.info("Inference finished for this input file.")

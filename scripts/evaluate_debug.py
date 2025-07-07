@@ -114,7 +114,7 @@ def evaluate(config):
         'Precision': torchmetrics.Precision(task="binary"),
         'Recall': torchmetrics.Recall(task="binary"),
         'IoU': torchmetrics.JaccardIndex(task="binary"),
-        #'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
+        #'Dice': torchmetrics.Dice(task="binary") 
     }).to(device)
 
     # Metrics for samples that contain fire
@@ -123,7 +123,7 @@ def evaluate(config):
         'Precision': torchmetrics.Precision(task="binary"),
         'Recall': torchmetrics.Recall(task="binary"),
         'IoU': torchmetrics.JaccardIndex(task="binary"),
-        #'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
+        #'Dice': torchmetrics.Dice(task="binary") 
     }).to(device)
     
     num_positive_samples = 0
@@ -142,7 +142,8 @@ def evaluate(config):
     # --- Main evaluation loop ---
     for batch_idx, batch in enumerate(progress_bar):
         conditions = batch["condition"].to(device)
-        targets = batch["target"].to(device) # Shape: (B, 1, H, W), values are 0 or 1
+        # targets now contain 0.0 and 2550.0 values from prepare_data.py
+        targets = batch["target"].to(device) 
         sample_ids = batch["id"] # Get sample IDs from dataset_loader
 
         with torch.no_grad():
@@ -153,10 +154,20 @@ def evaluate(config):
             continue
         
         # pred_probs are the heatmaps, used for Average Precision
-        pred_probs = (generated_samples_scaled.to(device) + 1) / 2.0 # Shape: (B, 1, H, W), values are [0,1]
-        # pred_binary is the binarized output, used for other metrics
-        pred_binary = (pred_probs > 0.5).int()
-        targets_int = targets.int()
+        # Model output is [-1, 1], scaled to [0, 1]
+        pred_probs = (generated_samples_scaled.to(device) + 1) / 2.0 
+
+        # --- NEW: Binarize targets for metrics and visualization ---
+        # Assuming 0.0 means "fire" (positive class) and 2550.0 means "no fire" (negative class)
+        # So, target_binary will be 1 for fire, 0 for no fire.
+        targets_binary_for_metrics = (targets == 0.0).int() 
+        
+        # pred_binary for visualization (still uses 0.5 threshold on model's probabilities)
+        pred_binary = (pred_probs > 0.5).int() 
+        
+        # Use the newly binarized targets for flattening
+        flat_targets = targets_binary_for_metrics.flatten()
+        # --- END NEW ---
 
         # --- Save visualizations for a few samples ---
         if samples_saved_count < num_samples_to_save:
@@ -178,10 +189,11 @@ def evaluate(config):
                     logging.warning(f"Could not extract input fire channel for {current_sample_id}. Index {ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS} out of bounds for conditions with {conditions.shape[1]} channels.")
 
 
-                # Ground truth target for Day N+1
-                target_day_N_plus_1 = targets[i, 0, :, :].cpu().numpy() # Target is 1 channel
-                target_day_N_plus_1_img = (target_day_N_plus_1 * 255).astype(np.uint8)
-                Image.fromarray(target_day_N_plus_1_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_target_dayN+1.png"))
+                # Ground truth target for Day N+1 (now correctly scaled for visualization)
+                # If 0.0 is fire (positive), map to 255 (white). If 2550.0 is no fire (negative), map to 0 (black).
+                # This makes fire appear white, which is a more common visual convention.
+                target_day_N_plus_1_viz = (targets_binary_for_metrics[i, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
+                Image.fromarray(target_day_N_plus_1_viz).save(os.path.join(viz_output_dir, f"{current_sample_id}_target_dayN+1.png"))
 
                 # Predicted probabilities for Day N+1
                 pred_probs_day_N_plus_1 = pred_probs[i, 0, :, :].cpu().numpy() # Pred is 1 channel
@@ -199,19 +211,20 @@ def evaluate(config):
         # --- Update metrics using torchmetrics ---
         # Flatten spatial dimensions to treat each pixel as a sample
         flat_preds_prob = pred_probs.flatten()
-        flat_preds_binary = pred_binary.flatten()
-        flat_targets = targets_int.flatten()
+        # Pass the correctly binarized targets to metrics
+        # flat_targets is already defined above
         
         # Update metrics for all samples
         metrics_all.update(flat_preds_prob, flat_targets)
 
         # Update metrics for fire-positive samples only
-        for i in range(targets.shape[0]):
-            if torch.sum(targets[i]) > 0:
+        # Check for positive samples based on the *correctly binarized* targets
+        for i in range(targets_binary_for_metrics.shape[0]):
+            if torch.sum(targets_binary_for_metrics[i]) > 0:
                 num_positive_samples += 1
                 positive_preds_prob_flat = pred_probs[i].flatten()
-                positive_preds_binary_flat = pred_binary[i].flatten()
-                positive_targets_flat = targets_int[i].flatten()
+                # Use targets_binary_for_metrics for positive samples as well
+                positive_targets_flat = targets_binary_for_metrics[i].flatten() 
                 metrics_positive.update(positive_preds_prob_flat, positive_targets_flat)
         # --- End of new metric update logic ---
 
