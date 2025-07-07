@@ -158,7 +158,9 @@ def train(config):
             optimizer.zero_grad()
             targets = batch["target"].to(device)
             conditions = batch["condition"].to(device)
-            targets_scaled = (targets * 2) - 1 
+            #targets_scaled = (targets * 2) - 1 
+            targets_binary_for_loss = (targets == 0.0).float() # Assuming 0.0 means "fire" (positive class), 2550.0 means "no fire" (negative)
+            targets_scaled = (targets_binary_for_loss * 2) - 1 # Scale to [-1, 1] for diffusion model
             t = torch.randint(0, config["diffusion_timesteps"], (targets.shape[0],), device=device).long()
             loss = diffusion_process.p_losses(x_start=targets_scaled, t=t, context=conditions, loss_type="l2")
             loss.backward()
@@ -178,7 +180,9 @@ def train(config):
                 for batch in val_progress_bar:
                     targets = batch["target"].to(device)
                     conditions = batch["condition"].to(device)
-                    targets_scaled = (targets * 2) - 1
+                    #targets_scaled = (targets * 2) - 1
+                    targets_binary_for_loss = (targets == 0.0).float() # Apply same binarization for validation targets
+                    targets_scaled = (targets_binary_for_loss * 2) - 1
                     t = torch.randint(0, config["diffusion_timesteps"], (targets.shape[0],), device=device).long()
                     loss = diffusion_process.p_losses(x_start=targets_scaled, t=t, context=conditions, loss_type="l2")
                     epoch_val_loss += loss.item()

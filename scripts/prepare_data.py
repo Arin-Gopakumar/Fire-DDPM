@@ -14,50 +14,12 @@ from rasterio.enums import Resampling
 from typing import Dict, List, Tuple
 import hashlib
 from tqdm import tqdm
-from datetime import datetime, timedelta # Import for date manipulation
+from datetime import datetime, timedelta
+import math # Import math for isnan
 
 # Regular expression to find a date pattern like "2019-04-19"
 date = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
-def save_tif_band_as_png(tif_path, output_png_path):
-    """
-    Loads a specific band from a TIFF file, scales it to 0-255, and saves as PNG.
-    Also prints basic statistics and generates a histogram of the raw data.
-    """
-    try:
-        with rasterio.open(tif_path) as src:
-            # Read the specified band (rasterio bands are 1-indexed)
-            data = src.read(23) 
-            data_new = data.flatten()
-            data_new.sort()
-            data_sorted = data_new[::-1]
-            count = 0
-            for row_idx in range(data.shape[0]): # Iterate up to 5 rows or max rows
-                for col_idx in range(data.shape[1]): # Iterate up to 5 columns or max cols
-                    pixel_value = data[row_idx, col_idx]
-                    if math.isnan(pixel_value):
-                        count += 1
-                        pixel_value = 2550
-                    data[row_idx, col_idx] = pixel_value
-            data_new = data.flatten()
-            mean = np.mean(data)
-            std = np.std(data)
-            # --- Print raw data statistics ---
-            print(f"\n--- Raw Data Stats for {os.path.basename(tif_path)} (Band {band_index + 1}) ---")
-            print(f"Shape: {data.shape}")
-            print(f"Data Type: {data.dtype}")
-            print(f"Min Value: {np.min(data)}")
-            print(f"Max Value: {np.max(data)}")
-            print(f"10th Max Value: {np.partition(data.flatten(), -10)[-10]}")
-            print(f"Mean Value: {np.mean(data):.4f}")
-            print(f"Standard Deviation value: {np.std(data)}")
-            print(f"--- Iterating through top-left 5x5 pixels of {os.path.basename(tif_path)} ---")
-            img_array = data.astype(np.uint8)
-            img = Image.fromarray(img_array, mode='L')
-            img.save(output_png_path)
-            print(f"Saved {output_png_path}")
-    except Exception as e:
-        print(f"Error processing {tif_path}: {e}")
 def resize(img, shape, nearest=False):
     """Resizes an image (numpy array) to a new shape."""
     res = np.empty((img.shape[0], *shape), dtype=img.dtype)
@@ -144,12 +106,9 @@ def collect_samples(fire_dir, k):
         samples.append((input_sid, past_tifs, target_tif, target_sid))
     return samples
 
-# In scripts/prepare_data.py, replace the existing calculate_global_stats function with this one.
-
 def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int) -> Dict:
     """
     Calculates the min and max for each channel across the entire training dataset.
-    This final version handles all numpy-to-json type conversion issues.
     """
     print("Calculating global normalization statistics from the training set...")
     # Get a sample to determine the number of channels
@@ -162,7 +121,6 @@ def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int)
     channel_maxs = [-np.inf] * total_channels
 
     for fd in tqdm(fires, desc="Calculating Stats"):
-        # Note: collect_samples now returns target_sid, which is not used here, but is harmless.
         for input_sid, imgs, mask_src, target_sid in collect_samples(fd, k): 
             try:
                 stacked_data = np.concatenate([read_tif(p) for p in imgs], 0)
@@ -172,21 +130,16 @@ def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int)
                     channel_mins[i] = min(channel_mins[i], np.min(stacked_data[i]))
                     channel_maxs[i] = max(channel_maxs[i], np.max(stacked_data[i]))
             except Exception as e:
-                # print(f"Warning: Error during stats calculation for sample {input_sid}: {e}") # Optional: more detailed error
-                pass # Silently skip problematic samples for stats calculation
+                pass
 
-    # First fix: Check for any remaining infinity values and replace them.
     for i in range(total_channels):
         if channel_mins[i] == np.inf or channel_maxs[i] == -np.inf:
             print(f"Warning: No valid data found for channel {i}. Using 0.0 as the default min/max.")
             channel_mins[i] = 0.0
             channel_maxs[i] = 0.0
 
-    # --- THIS IS THE NEW, DEFINITIVE FIX ---
-    # Convert all values from numpy types (e.g., np.float32) to native Python floats.
     channel_mins = [float(v) for v in channel_mins]
     channel_maxs = [float(v) for v in channel_maxs]
-    # --- END OF FIX ---
 
     return {"mins": channel_mins, "maxs": channel_maxs}
 
@@ -210,9 +163,9 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], st
     
     total = 0
     for fd in tqdm(fires, desc=f"Processing {split} split"):
-        # Unpack the new return values from collect_samples
         for input_sid, imgs, mask_src, target_sid in collect_samples(fd, k):
             try:
+                # --- Process Input (Conditions) - Keep as before ---
                 arrs = [resize(read_tif(p), sz, nearest=False) for p in imgs]
                 x = np.concatenate(arrs, 0)
                 
@@ -220,10 +173,37 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], st
                 x = normalize_globally(x, stats)
                 np.save(inp_dir/f"{input_sid}.npy", x) # Save input with its sid (Day N's date)
 
-                mask = read_tif(mask_src)[0] # This is the (k+1)-th day's data (Day N+1)
-                mask = resize(mask[None], sz, nearest=True)[0]
-                save_tif_band_as_png(inp_dir, tgt_dir)
-                np.save(tgt_dir / f"{target_sid}.npy", mask) # Save target with its OWN sid (Day N+1's date)
+                # --- Process Target (Mask) - NEW LOGIC based on user's direct instruction ---
+                with rasterio.open(mask_src) as src:
+                    # Read ALL channels for the target
+                    # This will be a (num_channels, Height, Width) array
+                    mask_raw_all_channels = src.read() 
+                
+                # Resize the raw mask (applied to all channels)
+                # mask_resized_all_channels will be (num_channels, H, W)
+                mask_resized_all_channels = resize(mask_raw_all_channels, sz, nearest=True)
+
+                # Initialize a single-channel array for the final processed mask
+                # Use float32 to accommodate 2550
+                mask_processed_single_channel = np.zeros(sz, dtype=np.float32) 
+
+                # Iterate through each pixel's "stack" of 23 channel values
+                # and apply the NaN logic
+                for r in range(mask_resized_all_channels.shape[1]): # Iterate rows
+                    for c in range(mask_resized_all_channels.shape[2]): # Iterate columns
+                        # Get the 23 values for the current pixel (r, c) across all channels
+                        pixel_values_across_channels = mask_resized_all_channels[:, r, c]
+                        
+                        # Check if ANY of these 23 values is NaN
+                        if np.any(np.isnan(pixel_values_across_channels)):
+                            mask_processed_single_channel[r, c] = 2550.0 # Assign 2550 if any NaN
+                        else:
+                            mask_processed_single_channel[r, c] = 0.0 # Assign 0 if no NaN
+                
+                # IMPORTANT: The target mask saved here will contain 0.0 or 2550.0.
+                # Your evaluate.py and model's training will need to be updated to correctly
+                # interpret these values as the two categories.
+                np.save(tgt_dir / f"{target_sid}.npy", mask_processed_single_channel) 
                 total += 1
             except Exception as e:
                 print(f"Skipping sample {input_sid} (target {target_sid}) due to error: {e}")
@@ -237,15 +217,11 @@ def main():
     p.add_argument("--days", type=int, default=3, help="Number of past days to use as conditioning.")
     args = p.parse_args()
     
-    # New: Path for storing normalization stats
     stats_path = args.out / "normalization_stats.json"
 
     fires_by_split = gather_fire_dirs(args.raw)
     
-    # New logic: Calculate stats only if they don't exist
     if not stats_path.exists():
-        # A sample tif is needed to find the number of channels per day
-        # Ensure there's at least one fire event in train split before trying to access it
         if not fires_by_split['train']:
             raise RuntimeError("No fire events found in the training split. Cannot calculate global statistics.")
         sample_tif_path = sort_date_tifs(fires_by_split['train'][0])[0]
@@ -265,6 +241,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
