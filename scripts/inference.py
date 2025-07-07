@@ -87,16 +87,16 @@ def load_conditioning_input(path, image_size, device):
         raise
 
 def run_inference(config):
-    # Determine the specific output directory for this input file # <--- ADD THESE TWO LINES
-    input_basename = os.path.splitext(os.path.basename(config["condition_input_path"]))[0] # <---
+    # Determine the specific output directory for this input file
+    input_basename = os.path.splitext(os.path.basename(config["condition_input_path"]))[0]
     
     current_output_dir = os.path.join(config["output_base_dir"], input_basename)
     
-    # Setup logging for this specific run, creating a new log file per input # <--- ADD THIS LINE
-    setup_inference_logging(current_output_dir) # <--- CHANGE THIS LINE (setup_inference_logging(config) -> setup_inference_logging(current_output_dir))
-    logging.info(f"Inference Configuration for {input_basename}:") # <--- ADD THESE THREE LINES
-    for key, value in config.items(): # <---
-        logging.info(f"  {key}: {value}") # <---
+    # Setup logging for this specific run, creating a new log file per input
+    setup_inference_logging(current_output_dir)
+    logging.info(f"Inference Configuration for {input_basename}:")
+    for key, value in config.items():
+        logging.info(f"  {key}: {value}")
     
     device = torch.device(config["device"])
 
@@ -159,56 +159,73 @@ def run_inference(config):
     logging.info(f"Starting sampling for {config['num_samples']} mask(s)...")
     with torch.no_grad():
         # `sample` returns final image scaled [-1, 1] and list of intermediate steps
-        generated_samples_scaled, intermediate_steps = diffusion_process.sample(
+        generated_samples_scaled_final, intermediate_steps = diffusion_process.sample(
             context=conditioning_tensor,
             batch_size=config["num_samples"],
             channels=config["target_channels"]
         )
     
-    # Scale back to [0, 1] for saving as image (binary mask)
-    generated_samples_01 = (generated_samples_scaled + 1) / 2.0
+    # --- Select 20th timestep for final prediction ---
+    # The list intermediate_steps is 0-indexed, so 20th timestep is index 19.
+    # Ensure it's not out of bounds.
+    if len(intermediate_steps) > 19: # Changed from 18 to 19
+        generated_samples_scaled_for_final_pred = intermediate_steps[19] # Changed from 18 to 19
+        logging.info("Using 20th timestep (index 19) output for final predicted mask.") # Updated log
+    else:
+        generated_samples_scaled_for_final_pred = generated_samples_scaled_final
+        logging.warning("Less than 20 timesteps available. Using final denoised output for predicted mask.") # Updated log
+    # --- END Selection ---
+
+    # Scale the selected output back to [0, 1] for saving as image (probability map)
+    generated_samples_01 = (generated_samples_scaled_for_final_pred + 1) / 2.0
     generated_samples_01 = torch.clamp(generated_samples_01, 0.0, 1.0)
     
-    # --- NEW: Binarize the output for saving ---
+    # --- Binarize the output for saving ---
     # Assuming the model outputs high probabilities for the positive class (which is 0.0 in your targets)
     # So, if model_output > 0.5, it predicts the positive class (fire).
-    # We want fire to be 2550 (e.g., for one class) and no-fire to be 0 (for the other class) for visualization.
+    # We want fire to be 255 (e.g., for one class) and no-fire to be 0 (for the other class) for visualization.
     generated_samples_binary = (generated_samples_01 > 0.5).float()
-    # --- END NEW ---
+    # --- END Binarization ---
 
     # 5. Save Output
-    os.makedirs(current_output_dir, exist_ok=True) # <--- ADD THIS LINE TO ENSURE THE SPECIFIC FOLDER EXISTS
+    os.makedirs(current_output_dir, exist_ok=True)
     output_basename = os.path.splitext(os.path.basename(config["condition_input_path"]))[0]
     for i in range(config["num_samples"]):
-        output_filename = os.path.join(current_output_dir, f"predicted_mask_{output_basename}_sample{i:02d}.png") # <--- CHANGE THIS LINE (config["output_dir"] -> current_output_dir)
-        #save_image(generated_samples_01[i], output_filename)
-        save_image(generated_samples_binary[i] * 2550, output_filename)
+        output_filename = os.path.join(current_output_dir, f"predicted_mask_{output_basename}_sample{i:02d}.png")
+        
+        # Save the binarized output, scaled to 0 or 255 for PNG
+        save_image(generated_samples_binary[i] * 255, output_filename) # Changed from 2550 to 255
         logging.info(f"Saved generated mask to {output_filename}")
 
-    # Optionally save intermediate steps (gif or individual images)
-    # For example, save the first sample's intermediates:
+    # --- Save intermediate steps (grayscale and binarized) ---
     if intermediate_steps and len(intermediate_steps) > 0:
-        intermediate_dir = os.path.join(current_output_dir, f"intermediates_{output_basename}_sample00") # <--- CHANGE THIS LINE (config["output_dir"] -> current_output_dir)
+        intermediate_dir = os.path.join(current_output_dir, f"intermediates_{output_basename}_sample00")
         os.makedirs(intermediate_dir, exist_ok=True)
         logging.info(f"Saving intermediate steps to {intermediate_dir}...")
         for step_idx, step_img_scaled in enumerate(intermediate_steps):
-            step_img_01 = (step_img_scaled[0] + 1) / 2.0 # Taking the first sample from batch
+            step_img_01 = (step_img_scaled[0] + 1) / 2.0 # Taking the first sample from batch, scale to [0,1]
             step_img_01 = torch.clamp(step_img_01, 0.0, 1.0)
-            #save_image(step_img_01, os.path.join(intermediate_dir, f"step_{step_idx:04d}.png"))
-            save_image(step_img_01 * 2550, os.path.join(intermediate_dir, f"step_{step_idx:04d}.png"))
+
+            # Save grayscale heatmap
+            save_image(step_img_01 * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_grayscale.png")) 
+
+            # Save binarized heatmap
+            step_img_binary = (step_img_01 > 0.5).float()
+            save_image(step_img_binary * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_binary.png")) # Changed from 2550 to 255
         logging.info("Intermediate steps saved.")
+    # --- END Saving ---
 
     logging.info("Inference finished for this input file.")
 
-if __name__ == "__main__": #arguments made by gpt
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate Wildfire Spread Masks using a trained Conditional DDPM")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to the trained model checkpoint (.pt)")
     # Modify condition_input to not be required
-    parser.add_argument("--condition_input", type=str, help="Path to a single conditioning input .npy file") # <--- REMOVE 'required=True'
+    parser.add_argument("--condition_input", type=str, help="Path to a single conditioning input .npy file")
     # Add new argument for directory
-    parser.add_argument("--condition_dir", type=str, help="Path to a directory containing multiple .npy conditioning input files for batch processing") # <--- ADD THIS LINE
+    parser.add_argument("--condition_dir", type=str, help="Path to a directory containing multiple .npy conditioning input files for batch processing")
     
-    parser.add_argument("--output_dir", type=str, help="Base directory to save generated masks. Subfolders will be created for each input file.") # <--- CHANGE HELP TEXT
+    parser.add_argument("--output_dir", type=str, help="Base directory to save generated masks. Subfolders will be created for each input file.")
     parser.add_argument("--num_samples", type=int, help="Number of masks to generate for the input")
     parser.add_argument("--image_size", type=int, help="Image size (override if not in checkpoint config)")
     parser.add_argument("--condition_channels", type=int, help="Condition channels (override if not in checkpoint config)")
@@ -217,17 +234,15 @@ if __name__ == "__main__": #arguments made by gpt
 
     # Apply command line arguments to a temporary config
     # We copy INFERENCE_CONFIG to avoid modifying the global default during batch processing
-    base_config = INFERENCE_CONFIG.copy() # <--- ADD THIS LINE
-    base_config["checkpoint_path"] = args.checkpoint # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+    base_config = INFERENCE_CONFIG.copy()
+    base_config["checkpoint_path"] = args.checkpoint
     
-    # Change output_dir to output_base_dir
-    if args.output_dir: base_config["output_base_dir"] = args.output_dir # <--- CHANGE THIS LINE (output_dir -> output_base_dir)
+    if args.output_dir: base_config["output_base_dir"] = args.output_dir
     
-    if args.num_samples: base_config["num_samples"] = args.num_samples # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
-    if args.image_size: base_config["image_size"] = args.image_size # Allows override # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
-    if args.condition_channels: base_config["condition_channels"] = args.condition_channels # Allows override # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+    if args.num_samples: base_config["num_samples"] = args.num_samples
+    if args.image_size: base_config["image_size"] = args.image_size
+    if args.condition_channels: base_config["condition_channels"] = args.condition_channels
 
-    # --- ADD THE FOLLOWING NEW LOGIC BLOCK ---
     if args.condition_dir:
         if not os.path.isdir(args.condition_dir):
             print(f"Error: Directory '{args.condition_dir}' not found.")
@@ -243,20 +258,20 @@ if __name__ == "__main__": #arguments made by gpt
             print(f"\nProcessing file {i+1}/{len(npy_files)}: {os.path.basename(npy_file_path)}")
             # Create a per-file config
             current_config = base_config.copy()
-            current_config["condition_input_path"] = npy_file_path # Set the specific input path for this iteration
+            current_config["condition_input_path"] = npy_file_path
             run_inference(current_config)
 
-    elif args.condition_input: # This is the original single-file processing logic
+    elif args.condition_input:
         if not os.path.exists(args.condition_input):
             print(f"Error: Conditioning input file '{args.condition_input}' not found.")
             sys.exit(1)
         
-        base_config["condition_input_path"] = args.condition_input # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+        base_config["condition_input_path"] = args.condition_input
         print(f"Processing single file: {os.path.basename(args.condition_input)}")
-        run_inference(base_config) # <--- CHANGE THIS LINE (INFERENCE_CONFIG -> base_config)
+        run_inference(base_config)
     else:
         parser.print_help()
         print("\nError: Either --condition_input or --condition_dir must be provided.")
         sys.exit(1)
 
-    print("\nAll inference tasks completed.") # <--- ADD THIS LINE
+    print("\nAll inference tasks completed.")
