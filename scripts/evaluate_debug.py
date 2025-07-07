@@ -6,7 +6,7 @@ import logging
 from tqdm import tqdm
 import sys
 import torchmetrics
-from PIL import Image # Added for image saving
+# Removed: from PIL import Image # Added for image saving (no longer needed)
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -53,7 +53,7 @@ def evaluate(config):
     channel_mult = tuple(model_config.get("channel_mult", (1, 2, 4, 8)))
     diffusion_timesteps = model_config.get("diffusion_timesteps", 20)
     
-    # IMPORTANT ASSUMPTIONS for visualization:
+    # IMPORTANT ASSUMPTIONS for visualization (these are for logging, not image saving anymore):
     # 1. Number of input days (k) is assumed to be 3 (default in prepare_data.py)
     #    This 'days' argument should be passed to evaluate.py
     num_input_days = config.get("days", 3) 
@@ -114,7 +114,7 @@ def evaluate(config):
         'Precision': torchmetrics.Precision(task="binary"),
         'Recall': torchmetrics.Recall(task="binary"),
         'IoU': torchmetrics.JaccardIndex(task="binary"),
-        #'Dice': torchmetrics.Dice(task="binary") 
+        'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
     }).to(device)
 
     # Metrics for samples that contain fire
@@ -123,19 +123,18 @@ def evaluate(config):
         'Precision': torchmetrics.Precision(task="binary"),
         'Recall': torchmetrics.Recall(task="binary"),
         'IoU': torchmetrics.JaccardIndex(task="binary"),
-        #'Dice': torchmetrics.Dice(task="binary") 
+        'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
     }).to(device)
     
     num_positive_samples = 0
     # --- End of new initialization ---
 
-    # --- Setup for saving visualizations ---
-    viz_output_dir = os.path.join(config["output_dir"], "visualizations", config['run_name'])
-    os.makedirs(viz_output_dir, exist_ok=True)
-    logging.info(f"Saving example visualizations to: {viz_output_dir}")
-    num_samples_to_save = 5 # Save images for the first 5 samples encountered
-    samples_saved_count = 0
-    # --- End of visualization setup ---
+    # Removed visualization setup block
+    # viz_output_dir = os.path.join(config["output_dir"], "visualizations", config['run_name'])
+    # os.makedirs(viz_output_dir, exist_ok=True)
+    # logging.info(f"Saving example visualizations to: {viz_output_dir}")
+    # num_samples_to_save = 5 
+    # samples_saved_count = 0
 
     progress_bar = tqdm(test_loader, desc="Evaluating on Test Set")
 
@@ -169,44 +168,27 @@ def evaluate(config):
         flat_targets = targets_binary_for_metrics.flatten()
         # --- END NEW ---
 
-        # --- Save visualizations for a few samples ---
-        if samples_saved_count < num_samples_to_save:
-            for i in range(conditions.shape[0]): # Iterate through samples in the current batch
-                if samples_saved_count >= num_samples_to_save:
-                    break # Stop saving if we've reached the limit
-
-                current_sample_id = sample_ids[i]
-
-                # Extract active fire map from the last input day (Day N)
-                # Ensure the index is within bounds
-                if ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS < conditions.shape[1]:
-                    # Assuming active fire map is a single channel
-                    input_fire_day_N = conditions[i, ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS, :, :].cpu().numpy()
-                    # Scale to 0-255 for saving as image
-                    input_fire_day_N_img = (input_fire_day_N * 255).astype(np.uint8)
-                    Image.fromarray(input_fire_day_N_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_input_fire_dayN.png"))
-                else:
-                    logging.warning(f"Could not extract input fire channel for {current_sample_id}. Index {ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS} out of bounds for conditions with {conditions.shape[1]} channels.")
-
-
-                # Ground truth target for Day N+1 (now correctly scaled for visualization)
-                # If 0.0 is fire (positive), map to 255 (white). If 2550.0 is no fire (negative), map to 0 (black).
-                # This makes fire appear white, which is a more common visual convention.
-                target_day_N_plus_1_viz = (targets_binary_for_metrics[i, 0, :, :].cpu().numpy() * 255).astype(np.uint8)
-                Image.fromarray(target_day_N_plus_1_viz).save(os.path.join(viz_output_dir, f"{current_sample_id}_target_dayN+1.png"))
-
-                # Predicted probabilities for Day N+1
-                pred_probs_day_N_plus_1 = pred_probs[i, 0, :, :].cpu().numpy() # Pred is 1 channel
-                pred_probs_day_N_plus_1_img = (pred_probs_day_N_plus_1 * 255).astype(np.uint8)
-                Image.fromarray(pred_probs_day_N_plus_1_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_pred_probs_dayN+1.png"))
-
-                # Binarized prediction for Day N+1
-                pred_binary_day_N_plus_1 = pred_binary[i, 0, :, :].cpu().numpy() # Pred is 1 channel
-                pred_binary_day_N_plus_1_img = (pred_binary_day_N_plus_1 * 255).astype(np.uint8)
-                Image.fromarray(pred_binary_day_N_plus_1_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_pred_binary_dayN+1.png"))
-                
-                samples_saved_count += 1
-        # --- End of visualization saving ---
+        # Removed visualization saving block
+        # if samples_saved_count < num_samples_to_save:
+        #     for i in range(conditions.shape[0]):
+        #         if samples_saved_count >= num_samples_to_save:
+        #             break
+        #         current_sample_id = sample_ids[i]
+        #         if ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS < conditions.shape[1]:
+        #             input_fire_day_N = conditions[i, ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS, :, :].cpu().numpy()
+        #             input_fire_day_N_img = (input_fire_day_N * 255).astype(np.uint8)
+        #             Image.fromarray(input_fire_day_N_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_input_fire_dayN.png"))
+        #         else:
+        #             logging.warning(f"Could not extract input fire channel for {current_sample_id}. Index {ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS} out of bounds for conditions with {conditions.shape[1]} channels.")
+        #         target_day_N_plus_1_viz = (targets_binary_for_metrics[i, 0, :, :].cpu().numpy() * 2550).astype(np.uint16)
+        #         Image.fromarray(target_day_N_plus_1_viz).save(os.path.join(viz_output_dir, f"{current_sample_id}_target_dayN+1.png"))
+        #         pred_probs_day_N_plus_1 = pred_probs[i, 0, :, :].cpu().numpy()
+        #         pred_probs_day_N_plus_1_img = (pred_probs_day_N_plus_1 * 255).astype(np.uint8)
+        #         Image.fromarray(pred_probs_day_N_plus_1_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_pred_probs_dayN+1.png"))
+        #         pred_binary_day_N_plus_1 = pred_binary[i, 0, :, :].cpu().numpy()
+        #         pred_binary_day_N_plus_1_img = (pred_binary_day_N_plus_1 * 2550).astype(np.uint16)
+        #         Image.fromarray(pred_binary_day_N_plus_1_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_pred_binary_dayN+1.png"))
+        #         samples_saved_count += 1
 
         # --- Update metrics using torchmetrics ---
         # Flatten spatial dimensions to treat each pixel as a sample
