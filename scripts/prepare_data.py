@@ -172,7 +172,7 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], st
     for fd in tqdm(fires, desc=f"Processing {split} split"):
         for input_sid, imgs, mask_src, target_sid in collect_samples(fd, k):
             try:
-                # --- Process Input (Conditions) - NEW LOGIC ---
+                # --- Process Input (Conditions) - Keep spatial, handle NaNs ---
                 arrs = [read_tif(p) for p in imgs] # Read raw TIFFs
                 # Resize each image in arrs first
                 resized_arrs = [resize(arr, sz, nearest=False) for arr in arrs]
@@ -185,25 +185,35 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], st
                 x_processed = x.astype(np.float32) # Ensure float32 for NaN handling
                 x_processed[np.isnan(x_processed)] = 255.0 # Replace NaNs in place
                 
-                np.save(inp_dir/f"{input_sid}.npy", x_processed) # Save processed input
+                np.save(inp_dir/f"{input_sid}.npy", x_processed) # Save processed input (C, H, W)
 
-                # --- Process Target (Mask) - Keep previous logic (flatten, NaN to 255, non-255 to 0) ---
+                # --- Process Target (Mask) - NEW LOGIC: Spatial (1, H, W), NaN to 255, non-255 to 0 ---
                 with rasterio.open(mask_src) as src:
                     mask_raw_all_channels = src.read() # Read ALL channels (num_channels, H, W)
                 
                 # Resize the raw mask (applied to all channels)
                 resized_mask_all_channels = resize(mask_raw_all_channels, sz, nearest=True)
 
-                # Flatten the target data
-                mask_flattened = resized_mask_all_channels.flatten().astype(np.float32)
-                
-                # Replace NaNs with 255
-                mask_flattened[np.isnan(mask_flattened)] = 255.0
+                # Initialize a single-channel array for the final processed mask
+                # Use float32 to accommodate 0.0 and 255.0
+                mask_processed_single_channel = np.zeros(sz, dtype=np.float32) 
 
-                # Apply final binarization for targets: values not 255 should be 0
-                mask_final_binary = np.where(mask_flattened != 255.0, 0.0, 255.0).astype(np.float32)
+                # Iterate through each pixel's "stack" of 23 channel values
+                # and apply the NaN logic to determine the final single-channel pixel value
+                for r in range(resized_mask_all_channels.shape[1]): # Iterate rows
+                    for c in range(resized_mask_all_channels.shape[2]): # Iterate columns
+                        pixel_values_across_channels = resized_mask_all_channels[:, r, c]
+                        
+                        # Check if ANY of these 23 values is NaN
+                        if np.any(np.isnan(pixel_values_across_channels)):
+                            mask_processed_single_channel[r, c] = 255.0 # Assign 255.0 if any NaN
+                        else:
+                            mask_processed_single_channel[r, c] = 0.0 # Assign 0.0 if no NaN
                 
-                np.save(tgt_dir / f"{target_sid}.npy", mask_final_binary) # Save final binary target
+                # Add a channel dimension to the target mask (1, H, W)
+                mask_final_target = np.expand_dims(mask_processed_single_channel, axis=0)
+                
+                np.save(tgt_dir / f"{target_sid}.npy", mask_final_target) # Save final binary target (1, H, W)
                 total += 1
             except Exception as e:
                 print(f"Skipping sample {input_sid} (target {target_sid}) due to error: {e}")
