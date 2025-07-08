@@ -114,7 +114,7 @@ def evaluate(config):
         'Precision': torchmetrics.Precision(task="binary"),
         'Recall': torchmetrics.Recall(task="binary"),
         'IoU': torchmetrics.JaccardIndex(task="binary"),
-        'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
+        #'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
     }).to(device)
 
     # Metrics for samples that contain fire
@@ -123,7 +123,7 @@ def evaluate(config):
         'Precision': torchmetrics.Precision(task="binary"),
         'Recall': torchmetrics.Recall(task="binary"),
         'IoU': torchmetrics.JaccardIndex(task="binary"),
-        'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
+        #'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
     }).to(device)
     
     num_positive_samples = 0
