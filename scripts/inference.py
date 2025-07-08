@@ -168,24 +168,26 @@ def run_inference(config):
     # --- Select 20th timestep for final prediction ---
     # The list intermediate_steps is 0-indexed, so 20th timestep is index 19.
     # Ensure it's not out of bounds.
-    if len(intermediate_steps) > 19: # Changed from 18 to 19
-        generated_samples_scaled_for_final_pred = intermediate_steps[19] # Changed from 18 to 19
-        logging.info("Using 20th timestep (index 19) output for final predicted mask.") # Updated log
+    if len(intermediate_steps) > 19:
+        generated_samples_scaled_for_final_pred = intermediate_steps[19]
+        logging.info("Using 20th timestep (index 19) output for final predicted mask.")
     else:
         generated_samples_scaled_for_final_pred = generated_samples_scaled_final
-        logging.warning("Less than 20 timesteps available. Using final denoised output for predicted mask.") # Updated log
+        logging.warning("Less than 20 timesteps available. Using final denoised output for predicted mask.")
     # --- END Selection ---
 
     # Scale the selected output back to [0, 1] for saving as image (probability map)
     generated_samples_01 = (generated_samples_scaled_for_final_pred + 1) / 2.0
     generated_samples_01 = torch.clamp(generated_samples_01, 0.0, 1.0)
     
-    # --- Binarize the output for saving ---
-    # Assuming the model outputs high probabilities for the positive class (which is 0.0 in your targets)
-    # So, if model_output > 0.5, it predicts the positive class (fire).
-    # We want fire to be 255 (e.g., for one class) and no-fire to be 0 (for the other class) for visualization.
+    # --- Binarize the output for saving and apply inverted color mapping ---
+    # Model predicts high probabilities for the positive class (which is 0.0 in your targets).
+    # If model_output > 0.5, it predicts the positive class (fire).
+    # We want fire (positive class) to be BLACK (0) and no-fire (negative class) to be WHITE (255).
     generated_samples_binary = (generated_samples_01 > 0.5).float()
-    # --- END Binarization ---
+    # Invert the binary mask: 1.0 (fire) becomes 0 (black), 0.0 (no fire) becomes 1.0 (white)
+    generated_samples_inverted = 1.0 - generated_samples_binary 
+    # --- END Binarization and Inversion ---
 
     # 5. Save Output
     os.makedirs(current_output_dir, exist_ok=True)
@@ -193,11 +195,11 @@ def run_inference(config):
     for i in range(config["num_samples"]):
         output_filename = os.path.join(current_output_dir, f"predicted_mask_{output_basename}_sample{i:02d}.png")
         
-        # Save the binarized output, scaled to 0 or 255 for PNG
-        save_image(generated_samples_binary[i] * 255, output_filename) # Changed from 2550 to 255
+        # Save the inverted binarized output, scaled to 0 or 255 for PNG
+        save_image(generated_samples_inverted[i] * 255, output_filename) 
         logging.info(f"Saved generated mask to {output_filename}")
 
-    # --- Save intermediate steps (grayscale and binarized) ---
+    # --- Save intermediate steps (grayscale and binarized with inverted colors) ---
     if intermediate_steps and len(intermediate_steps) > 0:
         intermediate_dir = os.path.join(current_output_dir, f"intermediates_{output_basename}_sample00")
         os.makedirs(intermediate_dir, exist_ok=True)
@@ -206,12 +208,13 @@ def run_inference(config):
             step_img_01 = (step_img_scaled[0] + 1) / 2.0 # Taking the first sample from batch, scale to [0,1]
             step_img_01 = torch.clamp(step_img_01, 0.0, 1.0)
 
-            # Save grayscale heatmap
+            # Save grayscale heatmap (fire=white, nofire=black)
             save_image(step_img_01 * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_grayscale.png")) 
 
-            # Save binarized heatmap
+            # Save binarized heatmap with inverted colors (fire=black, nofire=white)
             step_img_binary = (step_img_01 > 0.5).float()
-            save_image(step_img_binary * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_binary.png")) # Changed from 2550 to 255
+            step_img_binary_inverted = 1.0 - step_img_binary # Invert for visualization
+            save_image(step_img_binary_inverted * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_binary.png")) 
         logging.info("Intermediate steps saved.")
     # --- END Saving ---
 
