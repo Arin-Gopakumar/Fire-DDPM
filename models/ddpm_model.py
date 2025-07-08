@@ -197,6 +197,11 @@ class UNetConditional(nn.Module):
         self.final_conv = nn.Conv2d(model_channels, out_channels, kernel_size=1) # Map to output channels (noise)
 
     def forward(self, x_t, time, context):
+        # --- DEBUGGING PRINTS ---
+        print(f"DEBUG (UNetConditional.forward): x_t.shape: {x_t.shape}")
+        print(f"DEBUG (UNetConditional.forward): context.shape: {context.shape}")
+        print(f"DEBUG (UNetConditional.forward): x_t.shape[2:]: {x_t.shape[2:]}")
+        # --- END DEBUGGING PRINTS ---
         """
         Args:
             x_t (torch.Tensor): Noisy target image (B, in_target_channels, H, W)
