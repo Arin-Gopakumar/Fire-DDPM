@@ -6,6 +6,8 @@ import logging
 from tqdm import tqdm
 import sys
 import torchmetrics
+# Removed: from PIL import Image # Added for image saving (no longer needed)
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.ddpm_model import UNetConditional, GaussianDiffusion
@@ -42,27 +44,62 @@ def evaluate(config):
     model_config = checkpoint.get('config', {})
     logging.info(f"Loaded checkpoint from training run: {model_config.get('run_name', 'N/A')}")
 
+    # Retrieve model configuration parameters, with defaults
+    image_size = model_config.get("image_size", 64)
+    target_channels = model_config.get("target_channels", 1)
+    condition_channels_total = model_config.get("condition_channels", 24) # Total input channels (k * channels_per_day)
+    model_channels = model_config.get("model_channels", 64)
+    num_res_blocks = model_config.get("num_res_blocks", 2)
+    channel_mult = tuple(model_config.get("channel_mult", (1, 2, 4, 8)))
+    diffusion_timesteps = model_config.get("diffusion_timesteps", 20)
+    
+    # IMPORTANT ASSUMPTIONS for visualization (these are for logging, not image saving anymore):
+    # 1. Number of input days (k) is assumed to be 3 (default in prepare_data.py)
+    #    This 'days' argument should be passed to evaluate.py
+    num_input_days = config.get("days", 3) 
+    
+    # 2. Number of channels per single day's input block
+    #    If total condition_channels_total is 24 and num_input_days is 3, then 8 channels per day.
+    NUM_CHANNELS_PER_SINGLE_DAY_INPUT = condition_channels_total // num_input_days
+    if condition_channels_total % num_input_days != 0:
+        logging.warning(f"Total condition channels ({condition_channels_total}) is not divisible by number of input days ({num_input_days}). "
+                        "Channel indexing for visualization might be incorrect. Please check your prepare_data.py and model_config.")
+
+    # 3. Index of the active fire channel within a single day's input block
+    #    Common convention is that active fire is the first channel (index 0).
+    ACTIVE_FIRE_CHANNEL_INDEX_WITHIN_SINGLE_DAY = 0 
+    
+    # Calculate the index of the active fire channel for the LAST input day (Day N)
+    # This channel is part of the 'conditions' tensor.
+    ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS = (num_input_days - 1) * NUM_CHANNELS_PER_SINGLE_DAY_INPUT + ACTIVE_FIRE_CHANNEL_INDEX_WITHIN_SINGLE_DAY
+    
+    logging.info(f"Assuming {num_input_days} input days, with {NUM_CHANNELS_PER_SINGLE_DAY_INPUT} channels per day.")
+    logging.info(f"Active fire channel for Day N is assumed to be at index {ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS} in the concatenated conditions tensor.")
+    logging.info("Please verify these assumptions based on your prepare_data.py and raw data structure.")
+
+
     unet_model = UNetConditional(
-        image_size=model_config.get("image_size", 64),
-        in_target_channels=model_config.get("target_channels", 1),
-        in_condition_channels=model_config.get("condition_channels", 24),
-        model_channels=model_config.get("model_channels", 64),
-        out_channels=model_config.get("target_channels", 1),
-        num_res_blocks=model_config.get("num_res_blocks", 2),
-        channel_mult=tuple(model_config.get("channel_mult", (1, 2, 4, 8))),
+        image_size=image_size,
+        in_target_channels=target_channels,
+        in_condition_channels=condition_channels_total,
+        model_channels=model_channels,
+        out_channels=target_channels,
+        num_res_blocks=num_res_blocks,
+        channel_mult=channel_mult,
     ).to(device)
     unet_model.load_state_dict(checkpoint['model_state_dict'])
     unet_model.eval()
 
     diffusion_process = GaussianDiffusion(
         model=unet_model,
-        image_size=model_config.get("image_size", 64),
-        timesteps=model_config.get("diffusion_timesteps", 20),
+        image_size=image_size,
+        timesteps=diffusion_timesteps,
         device=device
     )
 
     logging.info(f"Loading test data from: {config['data_dir']}")
-    test_dataset = WildfireDataset(data_dir=config["data_dir"], split="test")
+    # Pass image_size to WildfireDataset constructor
+    test_dataset = WildfireDataset(data_dir=config["data_dir"], split="test", image_size=(image_size, image_size))
     test_loader = DataLoader(test_dataset, batch_size=config["batch_size"], shuffle=False, num_workers=config["num_workers"])
 
     if len(test_loader) == 0:
@@ -70,14 +107,14 @@ def evaluate(config):
         return
     logging.info(f"Found {len(test_dataset)} samples in the test set.")
 
-    # --- NEW: Initialize torchmetrics objects ---
+    # --- Initialize torchmetrics objects ---
     # Metrics for all samples
     metrics_all = torchmetrics.MetricCollection({
         'AP': torchmetrics.AveragePrecision(task="binary"),
         'Precision': torchmetrics.Precision(task="binary"),
         'Recall': torchmetrics.Recall(task="binary"),
         'IoU': torchmetrics.JaccardIndex(task="binary"),
-        #'Dice': torchmetrics.Dice(task="binary")
+        'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
     }).to(device)
 
     # Metrics for samples that contain fire
@@ -86,17 +123,27 @@ def evaluate(config):
         'Precision': torchmetrics.Precision(task="binary"),
         'Recall': torchmetrics.Recall(task="binary"),
         'IoU': torchmetrics.JaccardIndex(task="binary"),
-        #'Dice': torchmetrics.Dice(task="binary")
+        'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
     }).to(device)
     
     num_positive_samples = 0
     # --- End of new initialization ---
 
+    # Removed visualization setup block
+    # viz_output_dir = os.path.join(config["output_dir"], "visualizations", config['run_name'])
+    # os.makedirs(viz_output_dir, exist_ok=True)
+    # logging.info(f"Saving example visualizations to: {viz_output_dir}")
+    # num_samples_to_save = 5 
+    # samples_saved_count = 0
+
     progress_bar = tqdm(test_loader, desc="Evaluating on Test Set")
 
-    for batch in progress_bar:
+    # --- Main evaluation loop ---
+    for batch_idx, batch in enumerate(progress_bar):
         conditions = batch["condition"].to(device)
-        targets = batch["target"].to(device) # Shape: (B, 1, H, W), values are 0 or 1
+        # targets now contain 0.0 and 2550.0 values from prepare_data.py
+        targets = batch["target"].to(device) 
+        sample_ids = batch["id"] # Get sample IDs from dataset_loader
 
         with torch.no_grad():
             generated_samples_scaled, _ = diffusion_process.sample(context=conditions, batch_size=conditions.shape[0])
@@ -106,27 +153,60 @@ def evaluate(config):
             continue
         
         # pred_probs are the heatmaps, used for Average Precision
-        pred_probs = (generated_samples_scaled.to(device) + 1) / 2.0 # Shape: (B, 1, H, W), values are [0,1]
-        # pred_binary is the binarized output, used for other metrics
-        pred_binary = (pred_probs > 0.5).int()
-        targets_int = targets.int()
+        # Model output is [-1, 1], scaled to [0, 1]
+        pred_probs = (generated_samples_scaled.to(device) + 1) / 2.0 
 
-        # --- NEW: Update metrics using torchmetrics ---
+        # --- NEW: Binarize targets for metrics and visualization ---
+        # Assuming 0.0 means "fire" (positive class) and 2550.0 means "no fire" (negative class)
+        # So, target_binary will be 1 for fire, 0 for no fire.
+        targets_binary_for_metrics = (targets == 0.0).int() 
+        
+        # pred_binary for visualization (still uses 0.5 threshold on model's probabilities)
+        pred_binary = (pred_probs > 0.5).int() 
+        
+        # Use the newly binarized targets for flattening
+        flat_targets = targets_binary_for_metrics.flatten()
+        # --- END NEW ---
+
+        # Removed visualization saving block
+        # if samples_saved_count < num_samples_to_save:
+        #     for i in range(conditions.shape[0]):
+        #         if samples_saved_count >= num_samples_to_save:
+        #             break
+        #         current_sample_id = sample_ids[i]
+        #         if ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS < conditions.shape[1]:
+        #             input_fire_day_N = conditions[i, ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS, :, :].cpu().numpy()
+        #             input_fire_day_N_img = (input_fire_day_N * 255).astype(np.uint8)
+        #             Image.fromarray(input_fire_day_N_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_input_fire_dayN.png"))
+        #         else:
+        #             logging.warning(f"Could not extract input fire channel for {current_sample_id}. Index {ACTIVE_FIRE_CHANNEL_INDEX_IN_CONDITIONS} out of bounds for conditions with {conditions.shape[1]} channels.")
+        #         target_day_N_plus_1_viz = (targets_binary_for_metrics[i, 0, :, :].cpu().numpy() * 2550).astype(np.uint16)
+        #         Image.fromarray(target_day_N_plus_1_viz).save(os.path.join(viz_output_dir, f"{current_sample_id}_target_dayN+1.png"))
+        #         pred_probs_day_N_plus_1 = pred_probs[i, 0, :, :].cpu().numpy()
+        #         pred_probs_day_N_plus_1_img = (pred_probs_day_N_plus_1 * 255).astype(np.uint8)
+        #         Image.fromarray(pred_probs_day_N_plus_1_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_pred_probs_dayN+1.png"))
+        #         pred_binary_day_N_plus_1 = pred_binary[i, 0, :, :].cpu().numpy()
+        #         pred_binary_day_N_plus_1_img = (pred_binary_day_N_plus_1 * 2550).astype(np.uint16)
+        #         Image.fromarray(pred_binary_day_N_plus_1_img).save(os.path.join(viz_output_dir, f"{current_sample_id}_pred_binary_dayN+1.png"))
+        #         samples_saved_count += 1
+
+        # --- Update metrics using torchmetrics ---
         # Flatten spatial dimensions to treat each pixel as a sample
         flat_preds_prob = pred_probs.flatten()
-        flat_preds_binary = pred_binary.flatten()
-        flat_targets = targets_int.flatten()
+        # Pass the correctly binarized targets to metrics
+        # flat_targets is already defined above
         
         # Update metrics for all samples
         metrics_all.update(flat_preds_prob, flat_targets)
 
         # Update metrics for fire-positive samples only
-        for i in range(targets.shape[0]):
-            if torch.sum(targets[i]) > 0:
+        # Check for positive samples based on the *correctly binarized* targets
+        for i in range(targets_binary_for_metrics.shape[0]):
+            if torch.sum(targets_binary_for_metrics[i]) > 0:
                 num_positive_samples += 1
                 positive_preds_prob_flat = pred_probs[i].flatten()
-                positive_preds_binary_flat = pred_binary[i].flatten()
-                positive_targets_flat = targets_int[i].flatten()
+                # Use targets_binary_for_metrics for positive samples as well
+                positive_targets_flat = targets_binary_for_metrics[i].flatten() 
                 metrics_positive.update(positive_preds_prob_flat, positive_targets_flat)
         # --- End of new metric update logic ---
 
@@ -155,10 +235,11 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", required=True, type=str, help="Path to the trained model checkpoint (.pt) created by train.py.")
     parser.add_argument("--data_dir", required=True, type=str, help="Path to the processed data directory created by prepare_data.py (the one containing train/val/test folders).")
     parser.add_argument("--run_name", type=str, default="evaluation", help="A name for this evaluation run, for the log file.")
-    parser.add_argument("--output_dir", type=str, default="../../outputs/evaluation_reports", help="Directory to save evaluation log file.")
+    parser.add_argument("--output_dir", type=str, default="../outputs/evaluation_reports", help="Directory to save evaluation log file.")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size for evaluation. Adjust based on GPU memory.")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num_workers", type=int, default=2)
+    parser.add_argument("--days", type=int, default=3, help="Number of past days used as conditioning input (must match prepare_data.py).")
     args = parser.parse_args()
 
     eval_config = vars(args)
