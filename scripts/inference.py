@@ -184,7 +184,7 @@ def run_inference(config):
     # Model predicts high probabilities for the positive class (which is 0.0 in your targets).
     # If model_output > 0.5, it predicts the positive class (fire).
     # We want fire (positive class) to be BLACK (0) and no-fire (negative class) to be WHITE (255).
-    generated_samples_binary = (generated_samples_01 > 0.5).float()
+    generated_samples_binary = (generated_samples_01 > 0.7).float()
     # Invert the binary mask: 1.0 (fire) becomes 0 (black), 0.0 (no fire) becomes 1.0 (white)
     generated_samples_inverted = 1.0 - generated_samples_binary 
     # --- END Binarization and Inversion ---
@@ -212,7 +212,7 @@ def run_inference(config):
             save_image(step_img_01 * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_grayscale.png")) 
 
             # Save binarized heatmap with inverted colors (fire=black, nofire=white)
-            step_img_binary = (step_img_01 > 0.5).float()
+            step_img_binary = (step_img_01 > 0.7).float()
             step_img_binary_inverted = 1.0 - step_img_binary # Invert for visualization
             save_image(step_img_binary_inverted * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_binary.png")) 
         logging.info("Intermediate steps saved.")
