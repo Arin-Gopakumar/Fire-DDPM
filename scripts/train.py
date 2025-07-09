@@ -163,7 +163,7 @@ def train(config):
             #print(f"DEBUG (train.py): conditions.shape before UNet: {conditions.shape}")
             # --- END DEBUGGING PRINTS ---
             #targets_scaled = (targets * 2) - 1 
-            targets_binary_for_loss = (targets == 0.0).float() # Assuming 0.0 means "fire" (positive class), 2550.0 means "no fire" (negative)
+            targets_binary_for_loss = (targets == 255.0).float() # Assuming 255.0 means "fire" (positive class), 0.0 means "no fire" (negative)
             targets_scaled = (targets_binary_for_loss * 2) - 1 # Scale to [-1, 1] for diffusion model
             t = torch.randint(0, config["diffusion_timesteps"], (targets.shape[0],), device=device).long()
             # --- DEBUGGING PRINTS ---
@@ -264,3 +264,4 @@ if __name__ == "__main__":
     os.makedirs(CONFIG["results_dir"], exist_ok=True)
 
     train(CONFIG)
+
