@@ -128,7 +128,7 @@ def evaluate(config):
        'Precision': torchmetrics.Precision(task="binary"),
        'Recall': torchmetrics.Recall(task="binary"),
        'IoU': torchmetrics.JaccardIndex(task="binary"),
-       'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
+       #'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
    }).to(device)
 
 
@@ -138,7 +138,7 @@ def evaluate(config):
        'Precision': torchmetrics.Precision(task="binary"),
        'Recall': torchmetrics.Recall(task="binary"),
        'IoU': torchmetrics.JaccardIndex(task="binary"),
-       'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
+       #'Dice': torchmetrics.Dice(task="binary") # Re-enabled Dice
    }).to(device)
   
    num_positive_samples = 0
@@ -272,7 +272,7 @@ if __name__ == "__main__":
 
 
    eval_config = vars(args)
-   evaluate(eval_conf
+   evaluate(eval_config)
 
 
 
