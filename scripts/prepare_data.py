@@ -74,7 +74,7 @@ def gather_fire_dirs(root: Path) -> Dict[str, List[Path]]:
        elif year == "2020":
            print(f"Assigning {len(fire_events_in_year)} fire events from {year} to TEST set.")
            fires["test"].extend(fire_events_in_year)
-       elif year == "2021"]:
+       elif year == "2021":
            print(f"Assigning {len(fire_events_in_year)} fire events from {year} to VAL set.")
            fires["val"].extend(fire_events_in_year)
        else:
@@ -131,6 +131,7 @@ def calculate_global_stats(fires: List[Path], k: int, num_channels_per_day: int)
    """
    print("Calculating global normalization statistics from the training set...")
    # Get a sample to determine the number of channels
+   # FIX: Use 'fires' argument directly
    first_sample_path = sort_date_tifs(fires[0])[0]
    num_channels_per_day = read_tif(first_sample_path).shape[0]
    total_channels = k * num_channels_per_day
@@ -236,7 +237,7 @@ def run(split: str, fires: List[Path], out: Path, k: int, sz: Tuple[int,int], st
                        if np.any(np.isnan(pixel_values_across_channels)):
                            mask_processed_single_channel[r, c] = 0.0 # No fire (from NaN)
                        else:
-                           mask_processed_single_channel[r, c] = 255.0 # Fire (from valid data)
+                           mask_processed_single_channel[r, c] = 1.0 # Fire (from valid data)
               
                # Add a channel dimension to the target mask (1, H, W)
                mask_final_target = np.expand_dims(mask_processed_single_channel, axis=0)
@@ -264,7 +265,7 @@ def main():
    if not stats_path.exists():
        if not fires_by_split['train']:
            raise RuntimeError("No fire events found in the training split. Cannot calculate global statistics.")
-       sample_tif_path = sort_date_tifs(fires[0])[0]
+       sample_tif_path = sort_date_tifs(fires_by_split['train'][0])[0]
        num_channels_per_day = read_tif(sample_tif_path).shape[0]
       
        stats = calculate_global_stats(fires_by_split['train'], args.days, num_channels_per_day)
@@ -283,5 +284,3 @@ def main():
 
 if __name__ == "__main__":
    main()
-
-

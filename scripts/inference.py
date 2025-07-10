@@ -40,6 +40,7 @@ INFERENCE_CONFIG = {
 
 
 def setup_inference_logging(output_dir):
+   """Sets up logging for the inference script."""
    os.makedirs(output_dir, exist_ok=True)
    logging.basicConfig(
        level=logging.INFO,
@@ -96,6 +97,7 @@ def load_conditioning_input(path, image_size, device):
 
 
 def run_inference(config):
+   """Runs inference using a trained DDPM model and saves predicted masks."""
    # Determine the specific output directory for this input file
    input_basename = os.path.splitext(os.path.basename(config["condition_input_path"]))[0]
   
@@ -181,30 +183,27 @@ def run_inference(config):
            channels=config["target_channels"]
        )
   
-   # --- Select 20th timestep for final prediction ---
+   # --- Select 20th timestep for final prediction and prepare its binarized/inverted version ---
    # The list intermediate_steps is 0-indexed, so 20th timestep is index 19.
    # Ensure it's not out of bounds.
    if len(intermediate_steps) > 19:
-       generated_samples_scaled_for_final_pred = intermediate_steps[19]
+       selected_timestep_output_scaled = intermediate_steps[19]
        logging.info("Using 20th timestep (index 19) output for final predicted mask.")
    else:
-       generated_samples_scaled_for_final_pred = generated_samples_scaled_final
+       selected_timestep_output_scaled = generated_samples_scaled_final
        logging.warning("Less than 20 timesteps available. Using final denoised output for predicted mask.")
-   # --- END Selection ---
+   
+   # Scale selected output to [0, 1] (probability map)
+   selected_timestep_output_01 = (selected_timestep_output_scaled + 1) / 2.0
+   selected_timestep_output_01 = torch.clamp(selected_timestep_output_01, 0.0, 1.0)
 
-
-   # Scale the selected output back to [0, 1] for saving as image (probability map)
-   generated_samples_01 = (generated_samples_scaled_for_final_pred + 1) / 2.0
-   generated_samples_01 = torch.clamp(generated_samples_01, 0.0, 1.0)
-  
-   # --- Binarize the output for saving and apply inverted color mapping ---
+   # Binarize and invert the selected output ONCE for the final prediction image
    # Model predicts high probabilities for the positive class (fire, which is 255.0 in your targets).
-   # So, if model_output > 0.5, it predicts the positive class (fire).
+   # If model_output > 0.5, it predicts the positive class (fire).
    # We want fire (positive class) to be BLACK (0) and no-fire (negative class) to be WHITE (255).
-   generated_samples_binary = (generated_samples_01 > 0.5).float()
-   # Invert the binary mask: 1.0 (fire) becomes 0 (black), 0.0 (no fire) becomes 1.0 (white)
-   generated_samples_inverted = 1.0 - generated_samples_binary
-   # --- END Binarization and Inversion ---
+   predicted_fire_pixels_binary = (selected_timestep_output_01 > 0.5).float() # 1.0 for fire, 0.0 for no fire
+   final_predicted_mask_inverted_scaled = (1.0 - predicted_fire_pixels_binary) * 255 # Invert and scale to 0/255
+   # --- END Selection and Preparation for Final Prediction ---
 
 
    # 5. Save Output
@@ -213,8 +212,9 @@ def run_inference(config):
    for i in range(config["num_samples"]):
        output_filename = os.path.join(current_output_dir, f"predicted_mask_{output_basename}_sample{i:02d}.png")
       
-       # Save the inverted binarized output, scaled to 0 or 255 for PNG
-       save_image(generated_samples_inverted[i] * 255, output_filename)
+       # Save the final processed image tensor (already binarized and inverted)
+       # FIX: Squeeze the channel dimension for PIL.Image.fromarray
+       save_image(final_predicted_mask_inverted_scaled[i].squeeze(0), output_filename)
        logging.info(f"Saved generated mask to {output_filename}")
 
 
@@ -229,13 +229,17 @@ def run_inference(config):
 
 
            # Save grayscale heatmap (fire=white, nofire=black)
-           save_image(step_img_01 * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_grayscale.png"))
+           # The grayscale heatmap shows probabilities, so 1.0 is white, 0.0 is black.
+           # This is a standard probability visualization.
+           # FIX: Squeeze the channel dimension for PIL.Image.fromarray
+           save_image(step_img_01.squeeze(0) * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_grayscale.png"))
 
 
            # Save binarized heatmap with inverted colors (fire=black, nofire=white)
-           step_img_binary = (step_img_01 > 0.5).float()
-           step_img_binary_inverted = 1.0 - step_img_binary # Invert for visualization
-           save_image(step_img_binary_inverted * 255, os.path.join(intermediate_dir, f"step_{step_idx:04d}_binary.png"))
+           step_img_binary = (step_img_01 > 0.5).float() # 1.0 for fire, 0.0 for no fire
+           step_img_binary_inverted = (1.0 - step_img_binary) * 255 # Invert and scale to 0/255
+           # FIX: Squeeze the channel dimension for PIL.Image.fromarray
+           save_image(step_img_binary_inverted.squeeze(0), os.path.join(intermediate_dir, f"step_{step_idx:04d}_binary.png"))
        logging.info("Intermediate steps saved.")
    # --- END Saving ---
 
@@ -306,6 +310,4 @@ if __name__ == "__main__":
        sys.exit(1)
 
 
-   print("\nAll inference tasks completed.")
-
-
+   print("\nAll inference tasks completed")
