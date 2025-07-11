@@ -1,110 +1,59 @@
-# Conditional DDPM for Wildfire Spread Prediction
+# WildfireSpreadTS: A dataset of multi-modal time series for wildfire spread prediction
 
-## Goal
-This project aims to forecast future wildfire spread masks using a Conditional Denoising Diffusion Probabilistic Model (DDPM). The model is trained on 1–5 days of multichannel environmental inputs from the WildfireSpreadTS dataset to predict the fire mask for a subsequent day.
+This repository contains the code for recreating the experiments in the WildfireSpreadTS paper. 
 
-## Setup
+- [Link to main paper](https://openreview.net/pdf?id=RgdGkPRQ03)
+- [Link to supplementary material](https://openreview.net/attachment?id=RgdGkPRQ03&name=supplementary_material)
 
-1.  **Create Python Environment**:
-    It's highly recommended to use a virtual environment.
-    ```bash
-    python3 -m venv wildfire_env
-    source wildfire_env/bin/activate  # macOS/Linux
-    # wildfire_env\Scripts\activate   # Windows
-    ```
-    Alternatively, using conda:
-    ```bash
-    conda create -n wildfire_env python=3.9
-    conda activate wildfire_env
-    ```
+**Note: After publishing the paper, we discovered a bug in the dataset class.** Based on initial experiments, the corrected dataset class leads to slightly higher performance, but the trends in the results are basically the same as those reported in the paper. The bug was fixed in commit `ab3c8f35c5ec8c52c306a4488eaeb71a5a13d0de`, in case you want to roll-back the change to compare with the results in the paper.
 
-2.  **Install Dependencies**:
-    ```bash
-    pip install torch torchvision torchaudio
-    pip install numpy Pillow tqdm
-    pip install rasterio  # For processing .tif files in prepare_data.py
-    # pip install matplotlib # Optional, for visualization
-    ```
-    For specific PyTorch versions (e.g., with CUDA support), refer to the [official PyTorch website](https://pytorch.org/get-started/locally/).
+## Setup the environment
 
-## Data Preparation
+``` pip3 install -r requirements.txt ```
 
-The model expects data in a specific format: conditioning inputs as `.npy` files and target masks as `.png` files.
+## Preparing the dataset
 
-1.  **Download Raw Dataset**:
-    * Download the WildfireSpreadTS dataset (e.g., from Zenodo, as `WildfireSpreadTS.zip`).
-    * Unzip it to a known location on your system.
+The dataset is freely available at [https://doi.org/10.5281/zenodo.8006177](https://doi.org/10.5281/zenodo.8006177) under CC-BY-4.0. For training, you will need to convert them to HDF5 files, which take up twice as much space but allow for much faster training.
 
-2.  **Configure `prepare_data.py`**:
-    * Open `scripts/prepare_data.py`.
-    * Set `RAW_DATA_DIR` to the path where you unzipped the raw WildfireSpreadTS dataset.
-    * **Crucially, you MUST modify the `process_raw_input_data` and `process_raw_target_data` functions within this script.** These functions need to:
-        * Correctly iterate through the raw dataset's directory structure (e.g., `YEAR/fire_EVENTID/YYYY-MM-DD.tif`).
-        * Use `rasterio` to read the multi-band `.tif` files.
-        * Consult the WildfireSpreadTS documentation (`WildfireSpreadTS_Documentation.pdf`) to identify:
-            * Band indices for environmental variables (for conditioning input).
-            * The band index for the active fire mask (for the target).
-        * Update `NUM_CHANNELS_PER_DAY`, `TARGET_FIRE_MASK_BAND_INDEX`, and `LIST_OF_ENV_BAND_INDICES` in `prepare_data.py` based on the documentation and your choices.
-        * Implement logic to extract, resize (to `IMAGE_SIZE`), normalize (inputs, e.g., to `[-1, 1]`), and binarize (targets) the data.
-        * Save conditioning inputs as `(C, H, W)` `.npy` arrays and target masks as single-channel binary `.png` images in the `data/` subdirectories.
-    * Define a strategy for splitting fire events into `train`, `val`, and `test` sets within `prepare_data.py`.
+To convert the dataset to HDF5, run:
+```python3 src/preprocess/CreateHDF5Dataset.py --data_dir YOUR_DATA_DIR --target_dir YOUR_TARGET_DIR```
+ substituting the path to your local dataset and where you want the HDF5 version of the dataset to be created. 
 
-3.  **Run Data Preparation Script**:
-    Navigate to the `scripts/` directory and run:
-    ```bash
-    cd wildfire_ddpm/scripts/
-    python prepare_data.py
-    ```
-    This will populate `wildfire_ddpm/data/` with the processed data.
+You can skip this step, and simply pass `--data.load_from_hdf5=False` on the command line, but be aware that you won't be able to perform training at any reasonable speed. 
 
-## Training
+## Re-running the baseline experiments
 
-1.  **Configure Training Script**:
-    * Open `scripts/train.py`.
-    * Review the `CONFIG` dictionary at the top.
-    * **Important**: Ensure `CONFIG["condition_channels"]` matches the `TOTAL_INPUT_CHANNELS` (i.e., `NUM_CONDITIONING_DAYS * NUM_CHANNELS_PER_DAY`) derived from your `prepare_data.py` setup.
-    * Adjust `batch_size`, `epochs`, `learning_rate`, `image_size`, etc., as needed.
-    * Specify `device` (e.g., "cuda", "mps", "cpu").
+We use wandb to log experimental results. This can be turned off by setting the environment variable `WANDB_MODE=disabled`. The results will then be logged to a local directory instead.
 
-2.  **Run Training**:
-    Navigate to the `scripts/` directory and run:
-    ```bash
-    cd wildfire_ddpm/scripts/ # if not already there
-    python train.py --run_name wildfire_exp1 --epochs 100 --batch_size 4 --condition_channels 24
-    ```
-    *(Adjust `--condition_channels` and other arguments as per your configuration.)*
-    * Checkpoints will be saved in `checkpoints/{run_name}/`.
-    * Sample images generated during training will be in `outputs/training_samples/`.
+Experiments are parameterized via yaml files in the `cfgs` directory. Arguments are parsed via the [LightningCLI](https://lightning.ai/docs/pytorch/stable/cli/lightning_cli.html).
 
-## Inference (Sampling)
+Grid searches and repetitions of experiments were done via WandB sweeps. Those are parameterized via yaml files in the `cfgs` directory prefixed with `wandb_`. For example, to run the experiments that Table 3 in the main paper is based on, you can run a wandb sweep with `cfgs/unet/wandb_table3.yaml`. For explanations on how to use wandb sweeps please refer to the [original documentation](https://docs.wandb.ai/guides/sweeps). To run the same experiments without WandB, the parameters specified in the WandB sweep configuration file can simply be passed via the command line. 
 
-1.  **Configure Inference Script**:
-    * Open `scripts/inference.py`.
-    * Review `INFERENCE_CONFIG`.
-    * Ensure model parameters (like `condition_channels`, `image_size`) match the trained model. These are often loaded from the checkpoint's config if saved.
+For example, to train the U-net architecture on one day of observations, you could pass arguments on the command line as follows:
 
-2.  **Run Inference**:
-    Provide the path to a trained checkpoint and a sample conditioning input (`.npy` file from your processed test/validation set).
-    ```bash
-    cd wildfire_ddpm/scripts/ # if not already there
-    python inference.py \
-        --checkpoint ../checkpoints/wildfire_exp1/ckpt_epoch_100.pt \
-        --condition_input ../data/test/inputs/some_sample.npy \
-        --output_dir ../outputs/predictions_run1 \
-        --num_samples 4 \
-        --condition_channels 24
-    ```
-    *(Adjust paths and parameters accordingly.)*
-    * Predicted masks will be saved in the specified output directory.
+```
+python3 train.py --config=cfgs/unet/res18_monotemporal.yaml --trainer=cfgs/trainer_single_gpu.yaml --data=cfgs/data_monotemporal_full_features.yaml --seed_everything=0 --trainer.max_epochs=200 --do_test=True --data.data_dir YOUR_DATA_DIR
+```
+where you replace `YOUR_DATA_DIR` with the path to your local HDF5 dataset. Alternatively, you can permanently set the data directory in the respective data config files. Parameters defined in config files are overwritten by command-line arguments. Later arguments overwrite previously given arguments. 
 
-## Key Configuration Points
+## Re-creating the dataset
 
-* **`condition_channels`**: This is the total number of channels in your input conditioning data (`.npy` files). It's calculated as `NUM_CONDITIONING_DAYS * NUM_CHANNELS_PER_DAY` (from `prepare_data.py`). This value must be consistent across `prepare_data.py`, `train.py` (CONFIG), `inference.py` (INFERENCE_CONFIG), and the U-Net model instantiation.
-* **`image_size`**: Must be consistent across data preparation, training, and inference.
-* **Normalization**: Ensure your input conditioning data is normalized (e.g., to `[-1, 1]`) during the `prepare_data.py` step. Target masks are expected to be binary `[0, 1]` by the `WildfireDataset` loader, and are internally scaled to `[-1, 1]` for the diffusion process during training.
+The code to create the dataset using Google Earth Engine is available at [https://github.com/SebastianGer/WildfireSpreadTSCreateDataset](https://github.com/SebastianGer/WildfireSpreadTSCreateDataset).
 
-## Compute Requirements
 
-* **GPU Recommended**: Training DDPMs is computationally intensive. An NVIDIA GPU with CUDA support (recommended >= 8-12GB VRAM for 64x64 images, more for larger sizes) is highly recommended for reasonable training times.
-* **Mac MPS**: Macs with M-series chips can use "mps" for GPU acceleration, which is faster than CPU but generally slower than CUDA.
-* **CPU**: Possible for debugging or very small experiments, but will be extremely slow for full training.
+## Using the dataset for your own experiments
+
+To use the dataset outside of the baseline experiments, you can use the Lightning Datamodule at `src/dataloader/FireSpreadDataModule.py` which directly provides dataset loaders for train/val/test set. Alternatively, you can use the PyTorch dataset at `src/dataloader/FireSpreadDataset.py`. 
+
+## Citation
+
+```
+@inproceedings{
+    gerard2023wildfirespreadts,
+    title={WildfireSpread{TS}: A dataset of multi-modal time series for wildfire spread prediction},
+    author={Sebastian Gerard and Yu Zhao and Josephine Sullivan},
+    booktitle={Thirty-seventh Conference on Neural Information Processing Systems Datasets and Benchmarks Track},
+    year={2023},
+    url={https://openreview.net/forum?id=RgdGkPRQ03}
+}
+```
