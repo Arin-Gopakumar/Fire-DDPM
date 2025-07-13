@@ -1,45 +1,37 @@
 # cfgs/ddpm/ddpm_model.yaml
 
-# Configuration for the DDPMLightning PyTorch Lightning Module
+# Corrected Configuration for the DDPMLightning PyTorch Lightning Module
 # This file defines the parameters for DDPMLightning's __init__ method.
+# Removed the top-level 'model:' key to align with LightningCLI's expectation.
 
-model:
-  class_path: models.DDPMLightning  # Path to your DDPMLightning class
-  init_args:
-    unet_params:
-      image_size: 64
-      in_target_channels: 1
-      in_condition_channels: 115    # Total input channels (e.g., 5 days * 23 channels/day)
-      model_channels: 64
-      out_channels: 1
-      num_res_blocks: 2
-      channel_mult: [1, 2, 4, 8]
-      time_emb_dim_mult: 4
-      groups: 8
-    
-    diffusion_params:
-      image_size: 64
-      timesteps: 20
-      beta_schedule_type: "linear"
-      target_channels: 1
-      # Note: 'model' parameter is passed directly during instantiation in DDPMLightning.py
-      # so it should not be defined here.
+class_path: models.DDPMLightning  # Path to your DDPMLightning class
+init_args:
+  unet_params:
+    image_size: 64
+    in_target_channels: 1
+    in_condition_channels: 115    # Total input channels (e.g., 5 days * 23 channels/day)
+    model_channels: 64
+    out_channels: 1
+    num_res_blocks: 2
+    channel_mult: [1, 2, 4, 8]
+    time_emb_dim_mult: 4
+    groups: 8
+  
+  diffusion_params:
+    image_size: 64
+    timesteps: 20
+    beta_schedule_type: "linear"
+    target_channels: 1
 
-    optimizer_cfg:
-      class_path: torch.optim.AdamW
-      init_args:
-        lr: 0.0001
-        weight_decay: 0.01
+  optimizer_cfg:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 0.0001
+      weight_decay: 0.01
 
-    loss_cfg:
-      class_path: torch.nn.Identity # Dummy loss, as p_losses handles actual loss
-      init_args: {} # No specific args for Identity
+  loss_cfg:
+    class_path: torch.nn.Identity # Dummy loss, as p_losses handles actual loss
+    init_args: {} # No specific args for Identity
 
-    metrics_cfg:
-      # Metrics are initialized within DDPMLightning's _setup_metrics method.
-      # This dict can be used to pass any common metric configurations if needed.
-      # For now, it's an empty dict as default settings are used in _setup_metrics.
-      # If you wanted to, for example, pass a specific threshold to Precision, you'd add it here:
-      # precision_threshold: 0.5
-      # And then use it in _setup_metrics.
-      pass # Placeholder, can be an empty dict {} if no specific configs needed here
+  metrics_cfg:
+    pass # Placeholder, can be an empty dict {} if no specific configs needed here
