@@ -4,7 +4,7 @@
 # This file defines the parameters for DDPMLightning's __init__ method.
 # Removed the top-level 'model:' key to align with LightningCLI's expectation.
 
-class_path: models.DDPMLightning  # Path to your DDPMLightning class
+class_path: models.DDPMLightning.DDPMLightning  # Path to your DDPMLightning class
 init_args:
   unet_params:
     image_size: 64
@@ -33,5 +33,9 @@ init_args:
     class_path: torch.nn.Identity # Dummy loss, as p_losses handles actual loss
     init_args: {} # No specific args for Identity
 
-  metrics_cfg:
-    pass # Placeholder, can be an empty dict {} if no specific configs needed here
+  metrics_cfg: {}
+     # Placeholder, can be an empty dict {} if no specific configs needed here
+
+  n_channels: 115
+
+  pos_class_weight: 236

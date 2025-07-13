@@ -15,7 +15,7 @@ class DDPMLightning(pl.LightningModule):
     PyTorch Lightning Module for the Conditional Denoising Diffusion Probabilistic Model (DDPM).
     This module wraps the UNetConditional and GaussianDiffusion components.
     """
-    def __init__(self, unet_params: dict, diffusion_params: dict, optimizer_cfg: dict, loss_cfg: dict, metrics_cfg: dict):
+    def __init__(self, unet_params: dict, diffusion_params: dict, optimizer_cfg: dict, loss_cfg: dict, metrics_cfg: dict, n_channels: int, pos_class_weight):
         """
         Initializes the DDPMLightning module.
 
@@ -41,11 +41,13 @@ class DDPMLightning(pl.LightningModule):
         self.train_metrics = self._setup_metrics("train", metrics_cfg)
         self.val_metrics = self._setup_metrics("val", metrics_cfg)
         self.test_metrics = self._setup_metrics("test", metrics_cfg)
+        self.n_channels = n_channels
 
         # A dummy loss function is needed by LightningModule if not explicitly returned by step methods
         # However, p_losses computes the actual loss.
         # This is typically not needed if step methods return the loss directly.
         # self.loss_fn = nn.Identity() 
+
 
     def _setup_metrics(self, stage: str, metrics_cfg: dict):
         """Helper to set up MetricCollection for a given stage."""
@@ -54,7 +56,7 @@ class DDPMLightning(pl.LightningModule):
             'Precision': tm_cls.BinaryPrecision(),
             'Recall': tm_cls.BinaryRecall(),
             'IoU': tm_cls.BinaryJaccardIndex(),
-            'Dice': tm_cls.BinaryDice()
+            #'Dice': tm_cls.BinaryDice()
         }, prefix=f"{stage}_")
 
     def forward(self, x_t, t, context):
@@ -87,16 +89,47 @@ class DDPMLightning(pl.LightningModule):
         return loss
 
     def training_step(self, batch: dict, batch_idx: int):
+        print("Training step done")
         loss = self._common_step(batch, "train")
         return loss
 
     def validation_step(self, batch: dict, batch_idx: int):
+        print("Validation step done")
         loss = self._common_step(batch, "val")
         return loss
+    
+    def test_step(self, batch, batch_idx):
+        """_summary_ Compute predictions and loss for the given batch. Log test loss, F1, AP, precision, recall, IoU and confusion matrix.
 
-    def test_step(self, batch: dict, batch_idx: int):
-        conditions = batch["condition"]
-        targets = batch["target"]
+        Args:
+            batch (_type_): _description_
+            batch_idx (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        y_hat, y = self.get_pred_and_gt(batch)
+
+        loss = self.compute_loss(y_hat, y)
+        self.test_f1(y_hat, y)
+        self.test_avg_precision(y_hat, y)
+        self.test_precision(y_hat, y)
+        self.test_recall(y_hat, y)
+        self.test_iou(y_hat, y)
+        self.test_pr_curve.update(y_hat, y)
+        self.conf_mat.update(y_hat, y)
+
+        self.log("test_loss", loss.item(), sync_dist=True)
+        self.log_dict(
+            {
+                "test_f1": self.test_f1,
+                "test_AP": self.test_avg_precision,
+                "test_precision": self.test_precision,
+                "test_recall": self.test_recall,
+                "test_iou": self.test_iou,
+            }
+        )
+        return loss
         
         generated_samples_scaled, _ = self.diffusion.sample(
             context=conditions,
