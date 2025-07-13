@@ -2,11 +2,20 @@ from pytorch_lightning.utilities import rank_zero_only
 import torch
 from dataloader.FireSpreadDataModule import FireSpreadDataModule
 from pytorch_lightning.cli import LightningCLI
+import pytorch_lightning as pl # Ensure pl is imported early
 from models import SMPModel, BaseModel, ConvLSTMLightning, LogisticRegression  # noqa
 from models import BaseModel
 import wandb
 import os
+import sys
+import torchmetrics.classification as tm_cls # For metrics in CLI
 
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+
+from models.DDPMLightning import DDPMLightning
 from dataloader.FireSpreadDataset import FireSpreadDataset
 from dataloader.utils import get_means_stds_missing_values
 
@@ -85,7 +94,7 @@ def main():
 
     # LightningCLI automatically creates an argparse parser with required arguments and types,
     # and instantiates the model and datamodule. For this, it's important to import the model and datamodule classes above.
-    cli = MyLightningCLI(BaseModel, FireSpreadDataModule, subclass_mode_model=True, save_config_kwargs={
+    cli = MyLightningCLI(DDPMLightning, FireSpreadDataModule, subclass_mode_model=True, save_config_kwargs={
         "overwrite": True}, parser_kwargs={"parser_mode": "yaml"}, run=False)
     cli.wandb_setup()
 
