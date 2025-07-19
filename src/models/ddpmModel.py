@@ -110,8 +110,8 @@ class UNetConditional(nn.Module):
     ):
         super().__init__()
 
-        self.channel_mult = channel_mult #Added this bc gpt told me to
-        self.num_res_blocks = num_res_blocks #Added this bc gpt told me to 
+        self.channel_mult = channel_mult 
+        self.num_res_blocks = num_res_blocks 
         self.image_size = image_size
         self.in_target_channels = in_target_channels
         self.in_condition_channels = in_condition_channels
@@ -152,27 +152,11 @@ class UNetConditional(nn.Module):
 
         # Upsampling path
         self.up_blocks = nn.ModuleList()
-        for i in reversed(range(num_resolutions)):
-            out_ch = model_channels * channel_mult[i]
-            for _ in range(num_res_blocks + 1): # +1 because one resblock before upsample, one after for skip
-                # Input channels to ResNet block = current_channels (from up) + out_ch (from skip)
-                self.up_blocks.append(
-                    ResnetBlock(current_channels + out_ch if _ == 0 else out_ch, # first block in stage gets skip
-                                out_ch, time_emb_dim=time_emb_dim, groups=groups)
-                )
-                current_channels = out_ch # This logic is slightly off, fixed below
-            if i != 0: # Don't add upsample at the first level (highest res)
-                self.up_blocks.append(
-                     nn.ConvTranspose2d(current_channels, current_channels // channel_mult[i-1] * channel_mult[i-1] if i > 0 else model_channels,
-                                       kernel_size=4, stride=2, padding=1) # Upsample
-                )
-        # Corrected Upsampling path logic
-        self.up_blocks = nn.ModuleList()
         current_channels = model_channels * channel_mult[-1] # Start from bottleneck channels
         for i in reversed(range(num_resolutions)):
             expected_skip_channels = model_channels * channel_mult[i]
             # Upsample layer if not the first upsampling stage (i.e. if we are not at bottleneck resolution)
-            if i != num_resolutions -1 : # if its not the first layer of upsampling path (directly after bottleneck)
+            if i != num_resolutions -1 : 
                  self.up_blocks.append(
                     nn.ConvTranspose2d(current_channels, expected_skip_channels, kernel_size=4, stride=2, padding=1)
                  )
@@ -194,14 +178,9 @@ class UNetConditional(nn.Module):
 
 
         # Final layer
-        self.final_conv = nn.Conv2d(model_channels, out_channels, kernel_size=1) # Map to output channels (noise)
+        self.final_conv = nn.Conv2d(model_channels, out_channels, kernel_size=1) 
 
     def forward(self, x_t, time, context):
-        # --- DEBUGGING PRINTS ---
-        print(f"DEBUG (UNetConditional.forward): x_t.shape: {x_t.shape}")
-        print(f"DEBUG (UNetConditional.forward): context.shape: {context.shape}")
-        print(f"DEBUG (UNetConditional.forward): x_t.shape[2:]: {x_t.shape[2:]}")
-        # --- END DEBUGGING PRINTS ---
         """
         Args:
             x_t (torch.Tensor): Noisy target image (B, in_target_channels, H, W)
@@ -210,112 +189,66 @@ class UNetConditional(nn.Module):
         Returns:
             torch.Tensor: Predicted noise (B, out_channels, H, W)
         """
-        #print("0. model input x_t:", torch.isnan(x_t).any()) #gpt debug
-        #print("0. model input context:", torch.isnan(context).any()) #gpt debug
-
-        # 1. Concatenate noisy target and conditioning data
+        # FIX: Ensure x_t is 4D (B, C, H, W) by squeezing any extra '1' dimension
+        if x_t.ndim == 5 and x_t.shape[2] == 1:
+            x_t = x_t.squeeze(2) # Convert (B, C, 1, H, W) to (B, C, H, W)
+        
         # Ensure context is resized if necessary (though typically it should match x_t's H, W)
         if x_t.shape[2:] != context.shape[2:]:
              # This is a basic resize, consider more sophisticated alignment if aspects differ
             context = F.interpolate(context, size=x_t.shape[2:], mode='bilinear', align_corners=False)
 
-        context = torch.nan_to_num(context, nan=0.0, posinf=0.0, neginf=0.0) # <--- ADD THIS
         nn_input = torch.cat((x_t, context), dim=1)
 
-        #print("1. nn_input:", torch.isnan(nn_input).any()) #gpt debug
-
         # 2. Compute time embedding
-        t_emb = self.time_mlp(time) # (B, time_emb_dim)
-
-        #print("2. time embedding:", torch.isnan(t_emb).any()) #gpt debug
+        t_emb = self.time_mlp(time) 
 
         # 3. Initial convolution
-        h = self.init_conv(nn_input) # (B, model_channels, H, W)
+        h = self.init_conv(nn_input) 
         
-        #print("✅ After init_conv:", "has_nan:", torch.isnan(h).any().item(), "min:", h.min().item(), "max:", h.max().item()) #gpt debug
-        #print("3. init conv output:", torch.isnan(h).any()) #gpt debug
-
         # Skip connections
-        skips = [h] # Store the output of init_conv as the first "skip"
+        skips = [h] 
 
         # 4. Downsampling path
-        # Iterate through down_blocks: ResNet -> ResNet -> ... -> DownsampleConv
         block_idx = 0
-        num_resolutions = len(self.down_blocks) // (self.num_res_blocks +1) # +1 for downsample layer // gpt wanted me to add self to the num_res_blocks
-        for i in range(len(self.channel_mult)): # Iterate through resolutions // added self to channel_mult bc gpt told me to 
+        num_resolutions = len(self.channel_mult) # Corrected loop range
+        for i in range(num_resolutions):
             for _ in range(self.num_res_blocks):
                 h = self.down_blocks[block_idx](h, t_emb)
-                #print(f"🔽 Down block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
-                #print(f"4. down block {block_idx} output:", torch.isnan(h).any()) #gpt debug
                 skips.append(h)
                 block_idx +=1
-            if i < len(self.channel_mult) -1 : # If not the last resolution
+            if i < num_resolutions -1 : # If not the last resolution
                 h = self.down_blocks[block_idx](h) # Downsample conv
-                #print(f"🔽 Downsample block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
-                #print(f"5. downsample block {block_idx} output:", torch.isnan(h).any()) #gpt debug
-                skips.append(h) # Also store downsampled output before next resnet block
+                skips.append(h) 
                 block_idx +=1
 
 
         # 5. Bottleneck
         h = self.mid_block1(h, t_emb)
-        #print("🧱 Mid block 1 has_nan:", torch.isnan(h).any().item()) #gpt debug
         h = self.mid_block2(h, t_emb)
-        #print("🧱 Mid block 2 has_nan:", torch.isnan(h).any().item()) #gpt debug
 
         # 6. Upsampling path
-        # Iterate through up_blocks: UpsampleConv -> ResNet (cat skip) -> ResNet -> ...
         block_idx = 0
-        for i in reversed(range(len(self.channel_mult))):
-            if i < len(self.channel_mult) -1 : # If not the first upsampling layer (after bottleneck)
+        for i in reversed(range(num_resolutions)):
+            if i < num_resolutions -1 : 
                 h = self.up_blocks[block_idx](h) # Upsample conv
-                #print(f"🔼 Up block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
                 block_idx +=1
 
             # Concatenate with skip connection. Skips are stored in reverse order of use
-            # Number of ResNet blocks per resolution is num_res_blocks.
-            # There's one additional ResNet block that receives the concatenated features.
-            """
             for j in range(self.num_res_blocks +1):
                 skip_h = skips.pop()
-                # print(f"Up block {block_idx}: h shape: {h.shape}, skip_h shape: {skip_h.shape}")
                 if h.size(2) != skip_h.size(2) or h.size(3) != skip_h.size(3): # Ensure spatial dims match for concat
                      skip_h = F.interpolate(skip_h, size=h.shape[2:], mode='bilinear', align_corners=False)
 
-                concat_h = torch.cat((h, skip_h), dim=1)
-                h = self.up_blocks[block_idx](concat_h, t_emb) # This should be the ResNet block
-                block_idx +=1
-            """
-            #gpt wanted me to replace that block with this:
-            for j in range(self.num_res_blocks + 1):
-                skip_h = skips.pop()
-                if h.size(2) != skip_h.size(2) or h.size(3) != skip_h.size(3): 
-                    skip_h = F.interpolate(skip_h, size=h.shape[2:], mode='bilinear', align_corners=False)
-
-                if j == 0:
-                    # First block in upsampling stage: concatenate skip connection
+                if j == 0: # First block in upsampling stage: concatenate skip connection
                     h = self.up_blocks[block_idx](torch.cat((h, skip_h), dim=1), t_emb)
-                    #print(f"🔼 Up block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
-                else:
-                    # Subsequent blocks already assume the correct number of input channels
+                else: # Subsequent blocks already assume the correct number of input channels
                     h = self.up_blocks[block_idx](h, t_emb)
-                    #print(f"🔼 Up block {block_idx} output has_nan:", torch.isnan(h).any().item()) #gpt debug
                 block_idx += 1
 
-
-        # 7. Final layer - according to gpt debug
+        # 7. Final layer
         output = self.final_conv(h)
-        """
-        print("🟧 UNet final output stats:",
-            "min:", output.min().item(),
-            "max:", output.max().item(),
-            "mean:", output.mean().item(),
-            "std:", output.std().item(),
-            "has_nan:", torch.isnan(output).any().item())
-        """
         return output
-
-        #return self.final_conv(h)
 
 
 def linear_beta_schedule(timesteps, beta_start=0.0001, beta_end=0.02):
@@ -347,6 +280,7 @@ class GaussianDiffusion(nn.Module):
         self.timesteps = timesteps
         self.device = device
 
+        # Ensure all schedule tensors are moved to the correct device
         if beta_schedule_type == 'linear':
             betas = linear_beta_schedule(timesteps).to(self.device)
         elif beta_schedule_type == 'cosine':
@@ -354,30 +288,30 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f"Unknown beta schedule type: {beta_schedule_type}")
         
-        self.betas = betas  # Store betas for use in p_sample // gpt told me to add this
-
+        self.betas = betas  
 
         alphas = 1. - betas
-        self.alphas_cumprod = torch.cumprod(alphas, axis=0)
-        self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0) # alpha_cumprod_t-1
+        self.alphas_cumprod = torch.cumprod(alphas, axis=0).to(self.device) 
+        self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0).to(self.device) 
         
         # Calculations for diffusion q(x_t | x_{t-1}) and others
-        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
-        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)
-        
+        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod).to(self.device) 
+        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod).to(self.device) 
+
         # Calculations for posterior q(x_{t-1} | x_t, x_0)
-        self.posterior_variance = betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
+        self.posterior_variance = (betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)).to(self.device) 
         # Clip variance to avoid 0, which can happen at t=0 for some schedules
-        self.posterior_log_variance_clipped = torch.log(self.posterior_variance.clamp(min=1e-20))
+        self.posterior_log_variance_clipped = torch.log(self.posterior_variance.clamp(min=1e-20)).to(self.device) 
         
-        self.posterior_mean_coef1 = betas * torch.sqrt(self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
-        self.posterior_mean_coef2 = (1. - self.alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - self.alphas_cumprod)
+        self.posterior_mean_coef1 = (betas * torch.sqrt(self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)).to(self.device) 
+        self.posterior_mean_coef2 = ((1. - self.alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - self.alphas_cumprod)).to(self.device) 
 
     def _extract(self, a, t, x_shape):
         """Extracts values from a at specified timesteps t and reshapes for broadcasting."""
         batch_size = t.shape[0]
-        out = a.gather(-1, t) # Gathers along the last dimension
-        return out.reshape(batch_size, *((1,) * (len(x_shape) - 1))).to(t.device)
+        # Ensure 't' is on the same device as 'a' for gather operation
+        out = a.gather(-1, t.to(a.device)) # Explicitly move t to a's device
+        return out.reshape(batch_size, *((1,) * (len(x_shape) - 1)))
 
     def q_sample(self, x_start, t, noise=None):
         """
@@ -390,10 +324,16 @@ class GaussianDiffusion(nn.Module):
         if noise is None:
             noise = torch.randn_like(x_start, device=self.device)
 
-        sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, t, x_start.shape)
-        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
+        # FIX: Ensure x_start is 4D (B, C, H, W) before _extract
+        if x_start.ndim == 5 and x_start.shape[2] == 1:
+            x_start_squeezed = x_start.squeeze(2)
+        else:
+            x_start_squeezed = x_start
 
-        return sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
+        sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, t, x_start_squeezed.shape)
+        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_start_squeezed.shape)
+
+        return sqrt_alphas_cumprod_t * x_start_squeezed + sqrt_one_minus_alphas_cumprod_t * noise
 
     def p_losses(self, x_start, t, context, noise=None, loss_type="l2"):
         """
@@ -407,24 +347,9 @@ class GaussianDiffusion(nn.Module):
         if noise is None:
             noise = torch.randn_like(x_start, device=self.device)
 
-        #print("x_start has nan:", torch.isnan(x_start).any()) #gpt debug
-        #print("t has nan:", torch.isnan(t).any()) #gpt debug
-        #print("noise has nan:", torch.isnan(noise).any()) #gpt debug
-
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
 
-        #print("x_noisy has nan:", torch.isnan(x_noisy).any()) #gpt debug
-
-        #if torch.isnan(x_noisy).any(): #gpt debug
-            #print("NaN detected in x_noisy") #gpt debug
-
         predicted_noise = self.model(x_noisy, t, context) # UNet predicts the noise
-
-        #if torch.isnan(predicted_noise).any(): #gpt debug
-            #print("NaN detected in predicted_noise") #gpt debug
-
-        #if torch.isnan(noise).any(): #gpt debug
-            #print("NaN detected in noise") #gpt debug
 
         if loss_type == 'l1':
             loss = F.l1_loss(noise, predicted_noise)
@@ -435,61 +360,55 @@ class GaussianDiffusion(nn.Module):
         else:
             raise NotImplementedError()
 
-        #if torch.isnan(loss).any(): #gpt debug
-            #print("NaN detected in loss") #gpt debug
-
         return loss
 
     @torch.no_grad()
-    def p_sample(self, x_t, t, context, t_index):
-        """
-        Reverse diffusion process: p_theta(x_{t-1} | x_t)
-        Samples x_{t-1} from x_t using the learned model to predict noise.
-        This version uses a more stable formulation by first predicting x_0 and clipping it.
-        """
-        # Get the numbers needed for the calculation
-        sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, t, x_t.shape)
-        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape)
+    def p_mean_variance(self, x, t, context):
+        batch_size = x.shape[0]
         
-        # 1. Have the model predict the noise from the current fuzzy image
-        predicted_noise = self.model(x_t, t, context)
-        
-        # 2. Use the noise to guess what the final, clean image (x_0) looks like
-        x_0_pred = (x_t - sqrt_one_minus_alphas_cumprod_t * predicted_noise) / sqrt_alphas_cumprod_t
-        
-        # 3. THIS IS THE FIX: Apply the "speed limiter".
-        #    Clip the guess to ensure its values stay in a safe [-1, 1] range.
-        x_0_pred = torch.clamp(x_0_pred, -1.0, 1.0)
-        
-        # 4. Now, use this safe, clipped guess to calculate the next, slightly-less-fuzzy image.
-        #    This calculation is now stable and won't produce infinite values.
-        posterior_mean_coef1_t = self._extract(self.posterior_mean_coef1, t, x_t.shape)
-        posterior_mean_coef2_t = self._extract(self.posterior_mean_coef2, t, x_t.shape)
-        model_mean = posterior_mean_coef1_t * x_0_pred + posterior_mean_coef2_t * x_t
-    
-        if t_index == 0:
-            # At the last step, we're done. No more noise.
-            return model_mean
+        # FIX: Ensure x is 4D (B, C, H, W) before _extract
+        if x.ndim == 5 and x.shape[2] == 1:
+            x_squeezed = x.squeeze(2)
         else:
-            # For all other steps, add the correct, small amount of noise for the next step.
-            posterior_log_variance_t = self._extract(self.posterior_log_variance_clipped, t, x_t.shape)
-            noise = torch.randn_like(x_t)
-            return model_mean + torch.exp(0.5 * posterior_log_variance_t) * noise
-            
+            x_squeezed = x
+
+        # Get values from pre-computed schedules
+        betas_t = self._extract(self.betas, t, x_squeezed.shape)
+        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_squeezed.shape)
+        alphas_cumprod_t = self._extract(self.alphas_cumprod, t, x_squeezed.shape)
+        
+        # Predict noise using the model
+        predicted_noise = self.model(x_squeezed, t, context) 
+
+        # Calculate mean and variance
+        model_mean = (x_squeezed - betas_t * predicted_noise) / torch.sqrt(1. - alphas_cumprod_t)
+        posterior_variance_t = self._extract(self.posterior_variance, t, x_squeezed.shape)
+        posterior_log_variance_clipped_t = self._extract(self.posterior_log_variance_clipped, t, x_squeezed.shape)
+
+        return model_mean, posterior_variance_t, posterior_log_variance_clipped_t
+
+    @torch.no_grad()
+    def p_sample(self, x, t, context, t_index):
+        model_mean, model_variance, model_log_variance = self.p_mean_variance(x=x, t=t, context=context)
+        noise = torch.randn_like(x)
+        # No noise if t == 0
+        nonzero_mask = (t != 0).float().reshape(x.shape[0], *((1,) * (len(x.shape) - 1)))
+        return model_mean + nonzero_mask * torch.exp(0.5 * model_log_variance) * noise
+
     @torch.no_grad()
     def sample(self, context, batch_size=1, channels=1):
-        """
-        Full sampling loop (Algorithm 2 from DDPM paper).
-        Generates new images from noise, conditioned on context.
-        context: Conditioning data (B, C_cond, H, W)
-        """
-        image_shape = (batch_size, channels, self.image_size, self.image_size)
-        img = torch.randn(image_shape, device=self.device) # Start with pure noise x_T
-        imgs = []
+        # FIX: Ensure context is 4D (B, C, H, W)
+        if context.ndim == 5 and context.shape[2] == 1:
+            context_squeezed = context.squeeze(2)
+        else:
+            context_squeezed = context
 
+        # Initial noise for sampling
+        img = torch.randn((batch_size, channels, self.image_size, self.image_size), device=self.device)
+        
+        intermediate_steps = []
         for i in reversed(range(0, self.timesteps)):
-            t_tensor = torch.full((batch_size,), i, device=self.device, dtype=torch.long)
-            img = self.p_sample(img, t_tensor, context, i)
-            #if i % (self.timesteps // 10) == 0 or i < 10: # Save some intermediate steps
-            imgs.append(img.cpu())
+            t = torch.full((batch_size,), i, device=self.device, dtype=torch.long)
+            img = self.p_sample(img, t, context_squeezed, i) # Pass t_index
+            intermediate_steps.append(img.cpu()) # Store intermediate steps on CPU to save GPU memory
         return img.cpu(), imgs # Return final image and intermediate steps

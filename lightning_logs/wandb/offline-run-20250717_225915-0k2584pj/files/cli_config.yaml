@@ -15,7 +15,7 @@ trainer:
       id: null
       anonymous: null
       project: wildfire_progression
-      log_model: false
+      log_model: true
       experiment: null
       prefix: ''
       checkpoint_name: null
@@ -98,18 +98,14 @@ data:
   features_to_keep: null
   return_doy: false
   data_fold_id: 0
-do_train: true
+do_train: null
 do_predict: null
-do_test: null
+do_test: true
 do_validate: false
 ckpt_path: null
 model:
   class_path: models.DDPMLightning.DDPMLightning
   init_args:
-    n_channels: 40
-    flatten_temporal_dimension: false
-    pos_class_weight: 964.2632335191678
-    loss_function: L2
     unet_params:
       image_size: 64
       in_target_channels: 1
@@ -134,6 +130,9 @@ model:
       init_args:
         lr: 0.0001
         weight_decay: 0.01
+    loss_cfg:
+      class_path: torch.nn.Identity
+      init_args: {}
     metrics_cfg: {}
-    use_doy: false
-    required_img_size: null
+    n_channels: 40
+    pos_class_weight: 964.2632335191678

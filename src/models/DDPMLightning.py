@@ -3,33 +3,39 @@ import torch.nn as nn
 from torchmetrics import MetricCollection
 import torchmetrics.classification as tm_cls 
 import pytorch_lightning as pl 
-
-# Removed: from models.BaseModel import BaseModel # No longer inheriting from BaseModel
+from typing import Any, Literal, Optional, Tuple # Ensure Tuple is imported
 
 # Assuming UNetConditional and GaussianDiffusion are in src/models/ddpmModel.py
 from models.ddpmModel import UNetConditional, GaussianDiffusion
 
-# CRITICAL FIX: Inherit directly from pl.LightningModule
 class DDPMLightning(pl.LightningModule):
     """
     PyTorch Lightning Module for the Conditional Denoising Diffusion Probabilistic Model (DDPM).
     This module wraps the UNetConditional and GaussianDiffusion components.
+    It is adapted to fit the existing codebase's structure and LightningCLI.
     """
-    def __init__(self, unet_params: dict, diffusion_params: dict, optimizer_cfg: dict, loss_cfg: dict, metrics_cfg: dict, n_channels: int, pos_class_weight):
-        """
-        Initializes the DDPMLightning module.
-
-        Args:
-            unet_params (dict): Parameters for the UNetConditional model.
-            diffusion_params (dict): Parameters for the GaussianDiffusion process.
-            optimizer_cfg (dict): Configuration for the optimizer.
-            loss_cfg (dict): Configuration for the loss function (will be a dummy as p_losses handles it).
-            metrics_cfg (dict): Configuration for evaluation metrics.
-        """
+    def __init__(
+        self, 
+        # All non-default arguments first
+        n_channels: int, 
+        flatten_temporal_dimension: bool, 
+        pos_class_weight: float, 
+        loss_function: str, # Literal type converted to str for simplicity
+        unet_params: dict, 
+        diffusion_params: dict,
+        optimizer_cfg: dict, 
+        metrics_cfg: dict,   
+        
+        # All arguments with default values next
+        use_doy: bool = False, 
+        required_img_size: Optional[Tuple[int, int]] = None, 
+        
+        **kwargs # Catches any other unexpected keyword arguments passed by LightningCLI
+    ):
         super().__init__() # Call LightningModule's init
         
         # Save hyperparameters for easy logging and checkpointing by Lightning
-        self.save_hyperparameters(logger=True)
+        self.save_hyperparameters(logger=True) 
 
         # Instantiate the UNetConditional model
         self.unet = UNetConditional(**unet_params)
@@ -41,13 +47,6 @@ class DDPMLightning(pl.LightningModule):
         self.train_metrics = self._setup_metrics("train", metrics_cfg)
         self.val_metrics = self._setup_metrics("val", metrics_cfg)
         self.test_metrics = self._setup_metrics("test", metrics_cfg)
-        self.n_channels = n_channels
-
-        # A dummy loss function is needed by LightningModule if not explicitly returned by step methods
-        # However, p_losses computes the actual loss.
-        # This is typically not needed if step methods return the loss directly.
-        # self.loss_fn = nn.Identity() 
-
 
     def _setup_metrics(self, stage: str, metrics_cfg: dict):
         """Helper to set up MetricCollection for a given stage."""
@@ -65,14 +64,20 @@ class DDPMLightning(pl.LightningModule):
         """
         return self.unet(x_t, t, context)
 
-    def _common_step(self, batch: dict, stage: str):
+    def _common_step(self, batch: tuple, stage: str):
         """
+        ***********Question: How should get_pred_and_gt receive and unpack the batch from the DataLoader? Should it expect (conditions, targets, ids) as a tuple, or continue to expect (x, y) or (x, y, doys)?************
         Common logic for training, validation, and test steps.
+        Unpacks batch as (conditions, targets, ids).
         """
-        conditions = batch["condition"] 
-        targets = batch["target"]       
 
-        # Binarize targets for the diffusion model and loss calculation
+        conditions, targets = batch 
+        conditions = conditions.to(self.device)
+        targets = targets.to(self.device)
+
+        # CRITICAL: Binarize targets for the diffusion model and loss calculation
+        # prepare_data.py outputs targets where 255.0 is "fire" (positive class) and 0.0 is "no fire" (negative class).
+        # So, targets_binary will be 1.0 for fire, 0.0 for no fire.
         targets_binary = (targets == 255.0).float() 
 
         # Scale targets to [-1, 1] range for the diffusion model (x_start)
@@ -88,53 +93,23 @@ class DDPMLightning(pl.LightningModule):
         
         return loss
 
-    def training_step(self, batch: dict, batch_idx: int):
-        print("Training step done")
+    def training_step(self, batch: tuple, batch_idx: int):
         loss = self._common_step(batch, "train")
         return loss
 
-    def validation_step(self, batch: dict, batch_idx: int):
-        print("Validation step done")
+    def validation_step(self, batch: tuple, batch_idx: int):
         loss = self._common_step(batch, "val")
         return loss
-    
-    def test_step(self, batch, batch_idx):
-        """_summary_ Compute predictions and loss for the given batch. Log test loss, F1, AP, precision, recall, IoU and confusion matrix.
 
-        Args:
-            batch (_type_): _description_
-            batch_idx (_type_): _description_
-
-        Returns:
-            _type_: _description_
-        """
-        y_hat, y = self.get_pred_and_gt(batch)
-
-        loss = self.compute_loss(y_hat, y)
-        self.test_f1(y_hat, y)
-        self.test_avg_precision(y_hat, y)
-        self.test_precision(y_hat, y)
-        self.test_recall(y_hat, y)
-        self.test_iou(y_hat, y)
-        self.test_pr_curve.update(y_hat, y)
-        self.conf_mat.update(y_hat, y)
-
-        self.log("test_loss", loss.item(), sync_dist=True)
-        self.log_dict(
-            {
-                "test_f1": self.test_f1,
-                "test_AP": self.test_avg_precision,
-                "test_precision": self.test_precision,
-                "test_recall": self.test_recall,
-                "test_iou": self.test_iou,
-            }
-        )
-        return loss
+    def test_step(self, batch: tuple, batch_idx: int):
+        conditions, targets, _ = batch 
+        conditions = conditions.to(self.device)
+        targets = targets.to(self.device)
         
         generated_samples_scaled, _ = self.diffusion.sample(
             context=conditions,
             batch_size=conditions.shape[0],
-            channels=self.hparams.unet_params['out_channels']
+            channels=self.hparams.unet_params['out_channels'] 
         )
         predicted_probs = (generated_samples_scaled + 1) / 2.0
         predicted_probs = torch.clamp(predicted_probs, 0.0, 1.0)
@@ -151,14 +126,13 @@ class DDPMLightning(pl.LightningModule):
         return loss
 
     def on_validation_epoch_end(self):
-        pass # No metrics computed in val_step currently
+        pass
 
     def on_test_epoch_end(self):
         self.log_dict(self.test_metrics.compute(), on_epoch=True, logger=True)
         self.test_metrics.reset()
 
     def configure_optimizers(self):
-        # Instantiate optimizer from config
         optimizer_class = getattr(torch.optim, self.hparams.optimizer_cfg['class_path'].split('.')[-1])
         optimizer = optimizer_class(self.parameters(), **self.hparams.optimizer_cfg['init_args'])
         return optimizer
