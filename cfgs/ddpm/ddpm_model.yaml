@@ -6,6 +6,12 @@
 
 class_path: models.DDPMLightning.DDPMLightning  # Path to your DDPMLightning class
 init_args:
+  # --- Required arguments from DDPMLightning.__init__ ---
+  n_channels: 115                     # Total input channels (e.g., 5 days * 23 channels/day)
+  flatten_temporal_dimension: False   # DDPM does NOT flatten temporal dimension, it uses it as input
+  pos_class_weight: 1.0               # Default positive class weight (adjust if needed)
+  loss_function: "L2"                 # Dummy loss function name for BaseModel compatibility (actual loss is p_losses)
+# --- DDPM specific parameters ---
   unet_params:
     image_size: 64
     in_target_channels: 1
@@ -29,9 +35,10 @@ init_args:
       lr: 0.0001
       weight_decay: 0.01
 
-  loss_cfg:
-    class_path: torch.nn.Identity # Dummy loss, as p_losses handles actual loss
-    init_args: {} # No specific args for Identity
+  # Removed: loss_cfg as it's a dummy and CLI complains about its instantiation
+  #loss_cfg:
+    #class_path: torch.nn.Identity # Dummy loss, as p_losses handles actual loss
+    #init_args: {} # No specific args for Identity
 
   metrics_cfg: {}
      # Placeholder, can be an empty dict {} if no specific configs needed here

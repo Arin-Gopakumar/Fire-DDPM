@@ -98,7 +98,7 @@ data:
   features_to_keep: null
   return_doy: false
   data_fold_id: 0
-do_train: true
+do_train: false
 do_predict: null
 do_test: null
 do_validate: false
