@@ -1,0 +1,220 @@
+{
+    "os": "Linux-6.8.0-50-generic-x86_64-with-glibc2.35",
+    "python": "3.10.12",
+    "heartbeatAt": "2025-07-19T02:57:34.951659",
+    "startedAt": "2025-07-19T02:57:34.694359",
+    "docker": null,
+    "cuda": null,
+    "args": [
+        "--model",
+        "cfgs/ddpm/ddpm_model.yaml",
+        "--data",
+        "cfgs/data_monotemporal_full_features.yaml",
+        "--trainer",
+        "cfgs/trainer_single_gpu.yaml",
+        "--seed_everything",
+        "0",
+        "--trainer.max_epochs",
+        "50",
+        "--do_train",
+        "True",
+        "--data.data_dir",
+        "../data"
+    ],
+    "state": "running",
+    "program": "/workspace/Fire-DDPM/src/train.py",
+    "codePath": "src/train.py",
+    "git": {
+        "remote": "https://github.com/Arin-Gopakumar/Fire-DDPM.git",
+        "commit": "e167f8dc94139e7b0d2f1b9f301357605b5bd095"
+    },
+    "email": "ryanzerbib@gmail.com",
+    "root": "/workspace/Fire-DDPM",
+    "host": "939e5357d509",
+    "username": "root",
+    "executable": "/workspace/venv/bin/python3",
+    "cpu_count": 16,
+    "cpu_count_logical": 32,
+    "cpu_freq": {
+        "current": 3132.1246562500005,
+        "min": 400.0,
+        "max": 5881.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 5465.509,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 4207.489,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 4145.52,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5474.611,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 3092.042,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 3326.133,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5469.946,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5475.797,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5374.276,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5132.069,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 4370.498,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 4634.842,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5402.336,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5442.618,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 3125.932,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5300.304,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5374.563,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 5374.505,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 4505.861,
+            "min": 400.0,
+            "max": 5881.0
+        },
+        {
+            "current": 400.0,
+            "min": 400.0,
+            "max": 5881.0
+        }
+    ],
+    "disk": {
+        "total": 20.0,
+        "used": 0.20590591430664062
+    },
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 4090",
+            "memory_total": 25757220864
+        }
+    ],
+    "memory": {
+        "total": 125.01774978637695
+    }
+}

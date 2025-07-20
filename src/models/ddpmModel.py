@@ -183,19 +183,22 @@ class UNetConditional(nn.Module):
     def forward(self, x_t, time, context):
         """
         Args:
-            x_t (torch.Tensor): Noisy target image (B, in_target_channels, H, W)
+            x_t (torch.Tensor): Noisy target image (B, C, H, W)
             time (torch.Tensor): Timesteps (B,)
-            context (torch.Tensor): Conditioning data (B, in_condition_channels, H, W)
-        Returns:
-            torch.Tensor: Predicted noise (B, out_channels, H, W)
+            context (torch.Tensor): Conditioning data (B, C, H, W)
         """
-        # FIX: Ensure x_t is 4D (B, C, H, W) by squeezing any extra '1' dimension
-        if x_t.ndim == 5 and x_t.shape[2] == 1:
-            x_t = x_t.squeeze(2) # Convert (B, C, 1, H, W) to (B, C, H, W)
-        
-        # Ensure context is resized if necessary (though typically it should match x_t's H, W)
+        # ---> ADD THIS DEFENSIVE FIX <---
+        # If x_t is 3D and context is 4D, it means x_t is likely missing a dimension.
+        # Let's expand it to match the context.
+        if x_t.ndim == 3 and context.ndim == 4:
+            # Assuming x_t is (B, C, H) and needs a W dimension.
+            x_t = x_t.unsqueeze(-1)  # Shape becomes (B, C, H, 1)
+            # Expand the new dimension to match the context's width.
+            x_t = x_t.expand(-1, -1, -1, context.shape[3])
+        # -----------------------------
+
+        # Now, both tensors should be 4D. The original check can proceed.
         if x_t.shape[2:] != context.shape[2:]:
-             # This is a basic resize, consider more sophisticated alignment if aspects differ
             context = F.interpolate(context, size=x_t.shape[2:], mode='bilinear', align_corners=False)
 
         nn_input = torch.cat((x_t, context), dim=1)
@@ -271,40 +274,46 @@ class GaussianDiffusion(nn.Module):
     Gaussian Diffusion process for DDPM.
     Handles noise scheduling, forward diffusion (q_sample), and reverse denoising (p_sample).
     """
-    def __init__(self, model, image_size, timesteps=20, beta_schedule_type='linear',
-                 target_channels=1, device='cpu'):
-        super().__init__()
-        self.model = model # The UNet model
-        self.image_size = image_size
-        self.target_channels = target_channels # Channels of the image being diffused (e.g., 1 for mask)
-        self.timesteps = timesteps
-        self.device = device
+    # In src/models/ddpmModel.py, inside the GaussianDiffusion class
 
-        # Ensure all schedule tensors are moved to the correct device
+    def __init__(self, model, image_size, timesteps=20, beta_schedule_type='linear',
+                target_channels=1):
+        super().__init__()
+        self.model = model  # The UNet model
+        self.image_size = image_size
+        self.target_channels = target_channels  # Channels of the image being diffused
+        self.timesteps = timesteps
+
+        # --- Corrected Section using register_buffer ---
+
+        # 1. Define beta schedule
         if beta_schedule_type == 'linear':
-            betas = linear_beta_schedule(timesteps).to(self.device)
+            betas = linear_beta_schedule(timesteps)
         elif beta_schedule_type == 'cosine':
-            betas = cosine_beta_schedule(timesteps).to(self.device)
+            betas = cosine_beta_schedule(timesteps)
         else:
             raise ValueError(f"Unknown beta schedule type: {beta_schedule_type}")
-        
-        self.betas = betas  
 
-        alphas = 1. - betas
-        self.alphas_cumprod = torch.cumprod(alphas, axis=0).to(self.device) 
-        self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0).to(self.device) 
+        # 2. Register all schedule-related tensors as buffers
+        self.register_buffer('betas', betas)
         
-        # Calculations for diffusion q(x_t | x_{t-1}) and others
-        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod).to(self.device) 
-        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod).to(self.device) 
+        alphas = 1. - self.betas
+        self.register_buffer('alphas_cumprod', torch.cumprod(alphas, axis=0))
+        self.register_buffer('alphas_cumprod_prev', F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0))
+        
+        # Calculations for diffusion q(x_t | x_{t-1})
+        self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(self.alphas_cumprod))
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1. - self.alphas_cumprod))
 
         # Calculations for posterior q(x_{t-1} | x_t, x_0)
-        self.posterior_variance = (betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)).to(self.device) 
-        # Clip variance to avoid 0, which can happen at t=0 for some schedules
-        self.posterior_log_variance_clipped = torch.log(self.posterior_variance.clamp(min=1e-20)).to(self.device) 
+        posterior_variance = self.betas * (1. - self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
+        self.register_buffer('posterior_variance', posterior_variance)
         
-        self.posterior_mean_coef1 = (betas * torch.sqrt(self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)).to(self.device) 
-        self.posterior_mean_coef2 = ((1. - self.alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - self.alphas_cumprod)).to(self.device) 
+        # Clip variance to avoid 0
+        self.register_buffer('posterior_log_variance_clipped', torch.log(posterior_variance.clamp(min=1e-20)))
+        
+        self.register_buffer('posterior_mean_coef1', self.betas * torch.sqrt(self.alphas_cumprod_prev) / (1. - self.alphas_cumprod))
+        self.register_buffer('posterior_mean_coef2', (1. - self.alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - self.alphas_cumprod))
 
     def _extract(self, a, t, x_shape):
         """Extracts values from a at specified timesteps t and reshapes for broadcasting."""
@@ -322,18 +331,12 @@ class GaussianDiffusion(nn.Module):
         noise: Optional noise tensor; if None, generated from N(0,1)
         """
         if noise is None:
-            noise = torch.randn_like(x_start, device=self.device)
+            noise = torch.randn_like(x_start, device=x_start.device)
 
-        # FIX: Ensure x_start is 4D (B, C, H, W) before _extract
-        if x_start.ndim == 5 and x_start.shape[2] == 1:
-            x_start_squeezed = x_start.squeeze(2)
-        else:
-            x_start_squeezed = x_start
+        sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, t, x_start.shape)
+        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
 
-        sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, t, x_start_squeezed.shape)
-        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_start_squeezed.shape)
-
-        return sqrt_alphas_cumprod_t * x_start_squeezed + sqrt_one_minus_alphas_cumprod_t * noise
+        return sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
 
     def p_losses(self, x_start, t, context, noise=None, loss_type="l2"):
         """
@@ -345,7 +348,7 @@ class GaussianDiffusion(nn.Module):
         noise: The noise that was added (if None, generate new noise)
         """
         if noise is None:
-            noise = torch.randn_like(x_start, device=self.device)
+            noise = torch.randn_like(x_start, device=x_start.device)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
 
@@ -365,25 +368,19 @@ class GaussianDiffusion(nn.Module):
     @torch.no_grad()
     def p_mean_variance(self, x, t, context):
         batch_size = x.shape[0]
-        
-        # FIX: Ensure x is 4D (B, C, H, W) before _extract
-        if x.ndim == 5 and x.shape[2] == 1:
-            x_squeezed = x.squeeze(2)
-        else:
-            x_squeezed = x
 
         # Get values from pre-computed schedules
-        betas_t = self._extract(self.betas, t, x_squeezed.shape)
-        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_squeezed.shape)
-        alphas_cumprod_t = self._extract(self.alphas_cumprod, t, x_squeezed.shape)
+        betas_t = self._extract(self.betas, t, x.shape)
+        sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x.shape)
+        alphas_cumprod_t = self._extract(self.alphas_cumprod, t, x.shape)
         
         # Predict noise using the model
-        predicted_noise = self.model(x_squeezed, t, context) 
+        predicted_noise = self.model(x, t, context) 
 
         # Calculate mean and variance
-        model_mean = (x_squeezed - betas_t * predicted_noise) / torch.sqrt(1. - alphas_cumprod_t)
-        posterior_variance_t = self._extract(self.posterior_variance, t, x_squeezed.shape)
-        posterior_log_variance_clipped_t = self._extract(self.posterior_log_variance_clipped, t, x_squeezed.shape)
+        model_mean = (x - betas_t * predicted_noise) / torch.sqrt(1. - alphas_cumprod_t)
+        posterior_variance_t = self._extract(self.posterior_variance, t, x.shape)
+        posterior_log_variance_clipped_t = self._extract(self.posterior_log_variance_clipped, t, x.shape)
 
         return model_mean, posterior_variance_t, posterior_log_variance_clipped_t
 
@@ -397,11 +394,6 @@ class GaussianDiffusion(nn.Module):
 
     @torch.no_grad()
     def sample(self, context, batch_size=1, channels=1):
-        # FIX: Ensure context is 4D (B, C, H, W)
-        if context.ndim == 5 and context.shape[2] == 1:
-            context_squeezed = context.squeeze(2)
-        else:
-            context_squeezed = context
 
         # Initial noise for sampling
         img = torch.randn((batch_size, channels, self.image_size, self.image_size), device=self.device)
@@ -409,6 +401,6 @@ class GaussianDiffusion(nn.Module):
         intermediate_steps = []
         for i in reversed(range(0, self.timesteps)):
             t = torch.full((batch_size,), i, device=self.device, dtype=torch.long)
-            img = self.p_sample(img, t, context_squeezed, i) # Pass t_index
+            img = self.p_sample(img, t, context, i) # Pass t_index
             intermediate_steps.append(img.cpu()) # Store intermediate steps on CPU to save GPU memory
         return img.cpu(), imgs # Return final image and intermediate steps

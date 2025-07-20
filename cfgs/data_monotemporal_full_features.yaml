@@ -1,7 +1,7 @@
 data_dir: DATA_DIR_PATH
 batch_size: 64
 n_leading_observations: 1
-crop_side_length: 128
+crop_side_length: 64
 load_from_hdf5: true
 num_workers: 8
 remove_duplicate_features: false

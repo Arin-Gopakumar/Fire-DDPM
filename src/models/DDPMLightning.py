@@ -66,27 +66,49 @@ class DDPMLightning(pl.LightningModule):
 
     def _common_step(self, batch: tuple, stage: str):
         """
-        ***********Question: How should get_pred_and_gt receive and unpack the batch from the DataLoader? Should it expect (conditions, targets, ids) as a tuple, or continue to expect (x, y) or (x, y, doys)?************
         Common logic for training, validation, and test steps.
-        Unpacks batch as (conditions, targets, ids).
         """
-
-        conditions, targets = batch 
+        conditions, targets = batch
         conditions = conditions.to(self.device)
         targets = targets.to(self.device)
 
-        # CRITICAL: Binarize targets for the diffusion model and loss calculation
-        # prepare_data.py outputs targets where 255.0 is "fire" (positive class) and 0.0 is "no fire" (negative class).
-        # So, targets_binary will be 1.0 for fire, 0.0 for no fire.
-        targets_binary = (targets == 255.0).float() 
+        # This logic for the conditions tensor is correct and can remain.
+        if conditions.ndim == 5:
+            b, t, c, h, w = conditions.shape
+            conditions = conditions.view(b, t * c, h, w)
 
-        # Scale targets to [-1, 1] range for the diffusion model (x_start)
-        x_start = (targets_binary * 2) - 1 
+        # --- NEW ROBUST LOGIC FOR THE TARGETS TENSOR ---
+        # The goal is to ensure the `targets` tensor always has the shape (B, 1, H, W).
 
-        # Generate random timesteps for the diffusion process
-        t = torch.randint(0, self.diffusion.timesteps, (targets.shape[0],), device=self.device).long()
+        # 1. If the target is a 5D time-series, select the image from the last time step.
+        # Shape becomes (B, C, H, W).
+        if targets.ndim == 5:
+            targets = targets[:, -1, :, :, :]
 
-        # Calculate the diffusion loss (e.g., L2 loss between predicted noise and true noise)
+        # 2. If the target is 3D, it's missing the channel dimension. Add it.
+        # Shape becomes (B, 1, H, W).
+        if targets.ndim == 3:
+            targets = targets.unsqueeze(1)
+
+        # 3. If the target is 4D but has more than one channel, select only the first one.
+        # This now safely handles tensors that started as 5D or were already 4D.
+        # Shape becomes (B, 1, H, W).
+        if targets.shape[1] > 1:
+            targets = targets[:, 0:1, :, :]
+
+        # --- END OF FIX ---
+
+        # The rest of the function can now proceed with a correctly-shaped tensor.
+        # Binarize the single-channel target mask.
+        targets_binary = (targets == 255.0).float()
+
+        # Scale to [-1, 1] for the diffusion model (x_start).
+        x_start = (targets_binary * 2) - 1
+
+        # Generate random timesteps.
+        t = torch.randint(0, self.diffusion.timesteps, (x_start.shape[0],), device=self.device).long()
+
+        # Calculate the diffusion loss.
         loss = self.diffusion.p_losses(x_start=x_start, t=t, context=conditions, loss_type="l2")
 
         self.log(f"{stage}_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
