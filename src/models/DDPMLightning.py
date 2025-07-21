@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchmetrics import MetricCollection
 import torchmetrics.classification as tm_cls 
 import pytorch_lightning as pl 
 from typing import Any, Literal, Optional, Tuple # Ensure Tuple is imported
+
 
 # Assuming UNetConditional and GaussianDiffusion are in src/models/ddpmModel.py
 from models.ddpmModel import UNetConditional, GaussianDiffusion
@@ -124,28 +126,46 @@ class DDPMLightning(pl.LightningModule):
         return loss
 
     def test_step(self, batch: tuple, batch_idx: int):
-        conditions, targets, _ = batch 
-        conditions = conditions.to(self.device)
-        targets = targets.to(self.device)
-        
+        conditions, targets = batch
+
+        # This part is correct
+        if conditions.ndim == 5:
+            b, t, c, h, w = conditions.shape
+            conditions = conditions.view(b, t * c, h, w)
+
+        # Generate the 64x64 prediction
         generated_samples_scaled, _ = self.diffusion.sample(
             context=conditions,
             batch_size=conditions.shape[0],
-            channels=self.hparams.unet_params['out_channels'] 
+            channels=self.hparams.unet_params['out_channels']
         )
         predicted_probs = (generated_samples_scaled + 1) / 2.0
         predicted_probs = torch.clamp(predicted_probs, 0.0, 1.0)
+        predicted_probs = predicted_probs.to(targets.device)
 
+        # --- CORRECTED ORDER OF OPERATIONS FOR TARGETS ---
+
+        # 1. FIRST, ensure the targets tensor has the correct 4D shape.
+        if targets.ndim == 5:
+            targets = targets[:, -1, :, :, :]
+        if targets.ndim == 3:
+            targets = targets.unsqueeze(1) # Add channel dimension
+        if targets.shape[1] > 1:
+            targets = targets[:, 0:1, :, :] # Select first channel
+
+        # 2. NOW that targets is a 4D tensor, we can safely resize it.
+        if targets.shape[-2:] != predicted_probs.shape[-2:]:
+            targets = F.interpolate(targets.float(), size=predicted_probs.shape[-2:], mode='nearest')
+
+        # --- END OF FIX ---
+
+        # Binarize the resized targets
         targets_binary = (targets == 255.0).int()
 
+        # Update metrics
         self.test_metrics.update(predicted_probs.flatten(), targets_binary.flatten())
         
-        x_start = (targets_binary * 2) - 1 
-        t = torch.randint(0, self.diffusion.timesteps, (targets.shape[0],), device=self.device).long()
-        loss = self.diffusion.p_losses(x_start=x_start, t=t, context=conditions, loss_type="l2")
-        self.log("test_loss", loss, on_step=False, on_epoch=True, logger=True) 
-        
-        return loss
+        return {"predictions": predicted_probs, "targets": targets_binary}
 
     def on_validation_epoch_end(self):
         pass

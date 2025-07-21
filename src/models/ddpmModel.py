@@ -396,11 +396,11 @@ class GaussianDiffusion(nn.Module):
     def sample(self, context, batch_size=1, channels=1):
 
         # Initial noise for sampling
-        img = torch.randn((batch_size, channels, self.image_size, self.image_size), device=self.device)
+        img = torch.randn((batch_size, channels, self.image_size, self.image_size), device=context.device)
         
         intermediate_steps = []
         for i in reversed(range(0, self.timesteps)):
-            t = torch.full((batch_size,), i, device=self.device, dtype=torch.long)
+            t = torch.full((batch_size,), i, device=img.device, dtype=torch.long)
             img = self.p_sample(img, t, context, i) # Pass t_index
             intermediate_steps.append(img.cpu()) # Store intermediate steps on CPU to save GPU memory
-        return img.cpu(), imgs # Return final image and intermediate steps
+        return img.cpu(), intermediate_steps # Return final image and intermediate steps
