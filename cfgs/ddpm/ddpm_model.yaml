@@ -1,6 +1,6 @@
 # cfgs/ddpm/ddpm_model.yaml
 
-class_path: models.DDPMLightning.DDPMLightning
+class_path: models.ddpmModel2.DDPMLightning
 init_args:
   # This should match the number of channels/features provided by your dataloader.
   # The error log indicates this is 40.
