@@ -5,6 +5,7 @@ from pytorch_lightning.cli import LightningCLI
 import pytorch_lightning as pl # Ensure pl is imported early
 from models import SMPModel, BaseModel, ConvLSTMLightning, LogisticRegression  # noqa
 from models import BaseModel
+from models import ddpmModel2
 import wandb
 import os
 import sys
@@ -14,7 +15,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from models.DDPMLightning import DDPMLightning
+from models.ddpmModel2 import DDPMLightning
 from dataloader.FireSpreadDataset import FireSpreadDataset
 from dataloader.utils import get_means_stds_missing_values
 
@@ -87,7 +88,7 @@ class MyLightningCLI(LightningCLI):
         wandb.define_metric("val_loss", summary="min")
         wandb.define_metric("train_f1_epoch", summary="max")
         wandb.define_metric("val_f1", summary="max")
-
+        print("insidewandb_setup")
 
 def main():
 
@@ -119,7 +120,7 @@ def main():
         prediction_output = cli.trainer.predict(
             cli.model, cli.datamodule, ckpt_path=ckpt)
         x_af = torch.cat(
-            list(map(lambda tup: tup[0][:, -1, :, :].squeeze(), prediction_output)), axis=0)
+            list(map(lambda tup: tup[0][:, -1, :].squeeze(), prediction_output)), axis=0)
         y = torch.cat(list(map(lambda tup: tup[1], prediction_output)), axis=0)
         y_hat = torch.cat(
             list(map(lambda tup: tup[2], prediction_output)), axis=0)
