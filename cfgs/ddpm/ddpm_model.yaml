@@ -24,7 +24,7 @@ init_args:
 
   diffusion_params:
     image_size: 64
-    timesteps: 20
+    timesteps: 200
     beta_schedule_type: "linear"
     target_channels: 1
 

@@ -513,6 +513,27 @@ class DDPMLightning(pl.LightningModule, ABC):
         """Generate a full image from noise and evaluate it against the ground truth."""
         conditions, targets = batch
 
+    # --- START OF NEW DIAGNOSTIC CODE ---
+    # We will only run this for the very first batch (batch_idx == 0)
+        if batch_idx == 0:
+            print("--- Running Data Sanity Check ---")
+            
+            # 1. Save the last channel of the conditioning data (e.g., the active fire mask)
+            # We need to process it a bit to make it a viewable image
+            input_fire_mask = conditions[0, -1, :, :].cpu().numpy() # Take first item in batch, last channel
+            plt.imsave("debug_input_fire_mask.png", input_fire_mask, cmap='gray')
+            print("Saved 'debug_input_fire_mask.png' to disk.")
+
+            # 2. Save the ground truth target image
+            # We need to process it to ensure it's in the right shape and on the CPU
+            target_image = targets[0].cpu() # Take the first item in the batch
+            if target_image.ndim == 3:
+                target_image = target_image.squeeze(0) # Remove channel dimension if it exists
+            plt.imsave("debug_target_image.png", target_image.numpy(), cmap='gray')
+            print("Saved 'debug_target_image.png' to disk.")
+            print("--- Data Sanity Check Complete ---")
+    # --- END OF NEW DIAGNOSTIC CODE ---
+
         if conditions.ndim == 5:
             b, t, c, h, w = conditions.shape
             conditions = conditions.view(b, t * c, h, w)
@@ -542,11 +563,13 @@ class DDPMLightning(pl.LightningModule, ABC):
         self.test_conf_mat.update(predicted_probs.flatten(), targets_binary.flatten())
         self.test_pr_curve.update(predicted_probs.flatten(), targets_binary.flatten())
 
+        """
         print(self.test_metrics["test_AP"])
         print(self.test_metrics["test_F1"])
         print(self.test_metrics["test_Precision"])
         print(self.test_metrics["test_Recall"])
         print(self.test_metrics["test_IOU"])
+        """
 
     def on_test_epoch_end(self):
         """Log the final test metrics, confusion matrix, and PR curve."""
