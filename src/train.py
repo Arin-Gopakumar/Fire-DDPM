@@ -94,9 +94,9 @@ def main():
 
     # LightningCLI automatically creates an argparse parser with required arguments and types,
     # and instantiates the model and datamodule. For this, it's important to import the model and datamodule classes above.
-    cli = MyLightningCLI(DDPMLightning, FireSpreadDataModule, subclass_mode_model=True, save_config_kwargs={
+    cli = MyLightningCLI(BaseModel, FireSpreadDataModule, subclass_mode_model=True, save_config_kwargs={
         "overwrite": True}, parser_kwargs={"parser_mode": "yaml"}, run=False)
-    cli.wandb_setup()
+    #cli.wandb_setup()
 
     if cli.config.do_train:
         cli.trainer.fit(cli.model, cli.datamodule,
