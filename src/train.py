@@ -30,7 +30,7 @@ class MyLightningCLI(LightningCLI):
         parser.link_arguments("model.class_path",
                               "trainer.logger.init_args.name")
         parser.add_argument("--do_train", type=bool,
-                            help="If True: skip training the model.")
+                            help="If False: skip training the model.")
         parser.add_argument("--do_predict", type=bool,
                             help="If True: compute predictions.")
         parser.add_argument("--do_test", type=bool,
@@ -94,7 +94,7 @@ def main():
 
     # LightningCLI automatically creates an argparse parser with required arguments and types,
     # and instantiates the model and datamodule. For this, it's important to import the model and datamodule classes above.
-    cli = MyLightningCLI(BaseModel, FireSpreadDataModule, subclass_mode_model=True, save_config_kwargs={
+    cli = MyLightningCLI(DDPMLightning, FireSpreadDataModule, subclass_mode_model=True, save_config_kwargs={
         "overwrite": True}, parser_kwargs={"parser_mode": "yaml"}, run=False)
     #cli.wandb_setup()
 

@@ -108,6 +108,7 @@ class BaseModel(pl.LightningModule, ABC):
             B, T, C, H, W = x.shape
 
             if x.shape[-2:] != self.hparams.required_img_size:
+                print("x.shape[-2:] != self.hparams.required_img_size")
                 if B != 1:
                     raise ValueError(
                         "Not implemented: repeated cropping for batch size > 1."
@@ -147,7 +148,7 @@ class BaseModel(pl.LightningModule, ABC):
                 return y_hat, y
 
         y_hat = self(x, doys).squeeze(1)
-
+        #y_hat = y
         return y_hat, y
 
     def training_step(self, batch, batch_idx):
@@ -227,6 +228,11 @@ class BaseModel(pl.LightningModule, ABC):
             _type_: _description_
         """
         y_hat, y = self.get_pred_and_gt(batch)
+
+        if torch.any(torch.isnan(y)):
+            print(f"y tensor: {y}")
+        if torch.any(torch.isnan(y_hat)):
+            print(f"y_hat tensor: {y_hat}")
 
         loss = self.compute_loss(y_hat, y)
         self.test_f1(y_hat, y)

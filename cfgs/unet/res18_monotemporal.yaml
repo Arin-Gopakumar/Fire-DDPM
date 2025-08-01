@@ -14,6 +14,6 @@ model:
     pos_class_weight: 236 # (relative frequency in augmented 2018 and 2020 fires)^-1
     loss_function: Dice
 
-do_train: true
+do_train: false
 do_predict: false
 do_test: true

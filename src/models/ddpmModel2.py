@@ -13,6 +13,16 @@ from torchmetrics import MetricCollection
 import torchmetrics.classification as tm_cls 
 from typing import Any, Literal, Optional, Tuple # Ensure Tuple is imported
 
+def check_nan(tensor, class_name, method_name, var_name):
+    """Helper function to check for NaNs and print a detailed debug message."""
+    if torch.isnan(tensor).any():
+        print(f"\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        print(f"!!! NaN DETECTED !!!")
+        print(f"!!! Location: Class '{class_name}', Method '{method_name}'")
+        print(f"!!! Variable: '{var_name}'")
+        print(f"!!! Shape: {tensor.shape}")
+        print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
+
 class SinusoidalTimestepEmbedding(nn.Module):
     """
     Sinusoidal timestep embedding, as proposed in "Attention Is All You Need"
@@ -25,12 +35,14 @@ class SinusoidalTimestepEmbedding(nn.Module):
     def forward(self, time):
         device = time.device
         half_dim = self.dim // 2
-        embeddings = math.log(10000) / (half_dim - 1)
+        embeddings = math.log(10000) / (half_dim - 1 + 0.01)
         embeddings = torch.exp(torch.arange(half_dim, device=device) * -embeddings)
         embeddings = time[:, None] * embeddings[None, :]
         embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
         if self.dim % 2 == 1: # zero pad if dim is odd
             embeddings = F.pad(embeddings, (0,1))
+        #print(f"embeddings in forward method for SinusoidalTimestepEmbedding class: {embeddings}")
+        check_nan(embeddings, self.__class__.__name__, "forward", "output embeddings")
         return embeddings
 
 class ConvBlock(nn.Module):
@@ -42,7 +54,11 @@ class ConvBlock(nn.Module):
         self.act = nn.SiLU() # Swish-like activation
 
     def forward(self, x):
-        return self.act(self.norm(self.conv(x)))
+        #print(f"ConvBlock class forward function x value: {x}")
+        check_nan(x, self.__class__.__name__, "forward", "input x")
+        out = self.act(self.norm(self.conv(x)))
+        check_nan(out, self.__class__.__name__, "forward", "output")
+        return out
 
 class ResnetBlock(nn.Module):
     """
@@ -65,12 +81,21 @@ class ResnetBlock(nn.Module):
         )
 
     def forward(self, x, time_emb=None):
+        
+        check_nan(x, self.__class__.__name__, "forward", "input x")
+        if time_emb is not None:
+            check_nan(time_emb, self.__class__.__name__, "forward", "input time_emb")
+        
+        #print(f"ResnetBlock class forward method x value: {x}")
         h = self.block1(x)
         if self.mlp is not None and time_emb is not None:
             time_emb_out = self.mlp(time_emb)
             # Add time embedding, needs to be reshaped: (B, C) -> (B, C, 1, 1) for broadcasting
             h = h + time_emb_out.unsqueeze(-1).unsqueeze(-1)
         h = self.block2(h)
+        #print(f"ResnetBlock forward method return value: {h + self.res_conv(x)}")
+        out = h + self.res_conv(x)
+        check_nan(out, self.__class__.__name__, "forward", "output")
         return h + self.res_conv(x)
 
 class DownBlock(nn.Module):
@@ -95,9 +120,11 @@ class UpBlock(nn.Module):
         self.upsample = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=4, stride=2, padding=1)
 
     def forward(self, x, skip_x, time_emb):
+        #print(f"UpBlock x value: {x}")
         x = self.upsample(x)
         x = torch.cat([skip_x, x], dim=1) # Concatenate skip connection
         x = self.res_block(x, time_emb)
+        #print(f"UpBlock return x value forward function: {x}")
         return x
 
 
@@ -142,6 +169,8 @@ class UNetConditional(nn.Module):
         self.in_target_channels = in_target_channels
         self.in_condition_channels = in_condition_channels
         total_in_channels = in_target_channels + in_condition_channels # Combined input
+
+        self.input_norm = nn.BatchNorm2d(total_in_channels)
 
         # Time embedding
         time_emb_dim = model_channels * time_emb_dim_mult
@@ -213,6 +242,12 @@ class UNetConditional(nn.Module):
             time (torch.Tensor): Timesteps (B,)
             context (torch.Tensor): Conditioning data (B, C, H, W)
         """
+
+        check_nan(x_t, self.__class__.__name__, "forward", "input x_t")
+        check_nan(time, self.__class__.__name__, "forward", "input time")
+        check_nan(context, self.__class__.__name__, "forward", "input context")
+        
+
         # ---> ADD THIS DEFENSIVE FIX <---
         # If x_t is 3D and context is 4D, it means x_t is likely missing a dimension.
         # Let's expand it to match the context.
@@ -222,12 +257,15 @@ class UNetConditional(nn.Module):
             # Expand the new dimension to match the context's width.
             x_t = x_t.expand(-1, -1, -1, context.shape[3])
         # -----------------------------
+        #if torch.all(torch.isnan(x_t)):
+            #print(f"UNetConditional class forward method x value: {x_t}")
 
         # Now, both tensors should be 4D. The original check can proceed.
         if x_t.shape[2:] != context.shape[2:]:
             context = F.interpolate(context, size=x_t.shape[2:], mode='bilinear', align_corners=False)
 
         nn_input = torch.cat((x_t, context), dim=1)
+        nn_input = self.input_norm(nn_input)
 
         # 2. Compute time embedding
         t_emb = self.time_mlp(time) 
@@ -277,6 +315,9 @@ class UNetConditional(nn.Module):
 
         # 7. Final layer
         output = self.final_conv(h)
+        #if torch.all(torch.isnan(output)):
+            #print(f"UNetConditional class forward method output value: {output}")
+        check_nan(output, self.__class__.__name__, "forward", "final output")
         return output
 
 class GaussianDiffusion(nn.Module):
@@ -330,6 +371,8 @@ class GaussianDiffusion(nn.Module):
         batch_size = t.shape[0]
         # Ensure 't' is on the same device as 'a' for gather operation
         out = a.gather(-1, t.to(a.device)) # Explicitly move t to a's device
+        #if torch.all(torch.isnan(out.reshape(batch_size, *((1,) * (len(x_shape) - 1))))):
+            #(f"GaussianDiffusion class extract method out value: {out.reshape(batch_size, *((1,) * (len(x_shape) - 1)))}")
         return out.reshape(batch_size, *((1,) * (len(x_shape) - 1)))
 
     def q_sample(self, x_start, t, noise=None):
@@ -340,12 +383,19 @@ class GaussianDiffusion(nn.Module):
         t: Timestep (B,)
         noise: Optional noise tensor; if None, generated from N(0,1)
         """
+
+        check_nan(x_start, self.__class__.__name__, "q_sample", "input x_start")
+
         if noise is None:
+            print(f"Noise is None")
             noise = torch.randn_like(x_start, device=x_start.device)
 
         sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, t, x_start.shape)
         sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
-
+        #if torch.all(sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise):
+            #print(f"GaussianDiffusion clas q_sample method return val: {sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise}")
+        x_noisy = sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
+        check_nan(x_noisy, self.__class__.__name__, "q_sample", "output x_noisy")
         return sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
 
     def p_losses(self, x_start, t, context, noise=None, loss_type="l2"):
@@ -358,25 +408,34 @@ class GaussianDiffusion(nn.Module):
         noise: The noise that was added (if None, generate new noise)
         """
         if noise is None:
+            print("Noise is none, p_losses")
             noise = torch.randn_like(x_start, device=x_start.device)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
 
         predicted_noise = self.model(x_noisy, t, context) # UNet predicts the noise
 
+        check_nan(predicted_noise, self.__class__.__name__, "p_losses", "predicted_noise from U-Net")
+
         if loss_type == 'l1':
+            print("l1 loss")
             loss = F.l1_loss(noise, predicted_noise)
         elif loss_type == 'l2':
+            print("l2 loss")
             loss = F.mse_loss(noise, predicted_noise)
         elif loss_type == "huber":
+            print("huber")
             loss = F.smooth_l1_loss(noise, predicted_noise)
         else:
             raise NotImplementedError()
-
+        print(f"loss: {loss}")
+        
+        check_nan(loss, self.__class__.__name__, "p_losses", "final loss")
         return loss
 
     @torch.no_grad()
     def p_mean_variance(self, x, t, context):
+        #print(f"p_mean_variance vals, x: {x}, t: {t}")
         batch_size = x.shape[0]
 
         # Get values from pre-computed schedules
@@ -385,26 +444,34 @@ class GaussianDiffusion(nn.Module):
         alphas_cumprod_t = self._extract(self.alphas_cumprod, t, x.shape)
         
         # Predict noise using the model
-        predicted_noise = self.model(x, t, context) 
+        predicted_noise = self.model(x, t, context)
+        check_nan(predicted_noise, self.__class__.__name__, "p_mean_variance", "predicted_noise from U-Net") 
 
         # Calculate mean and variance
-        model_mean = (x - betas_t * predicted_noise) / torch.sqrt(1. - alphas_cumprod_t)
+        model_mean = (x - betas_t * predicted_noise) / (torch.sqrt(1. - alphas_cumprod_t))
+        check_nan(model_mean, self.__class__.__name__, "p_mean_variance", "output model_mean")
         posterior_variance_t = self._extract(self.posterior_variance, t, x.shape)
         posterior_log_variance_clipped_t = self._extract(self.posterior_log_variance_clipped, t, x.shape)
+
+        #print(f"p_mean_variance return val 1: {model_mean}")
+        #print(f"p_mean_variance return val 2: {posterior_variance_t}")
+        #print(f"p_mean_variance return val 3: {posterior_log_variance_clipped_t}")
 
         return model_mean, posterior_variance_t, posterior_log_variance_clipped_t
 
     @torch.no_grad()
     def p_sample(self, x, t, context, t_index):
+        #print(f"p_sample input vals: {x}, {t}, {context}, {t_index}")
         model_mean, model_variance, model_log_variance = self.p_mean_variance(x=x, t=t, context=context)
         noise = torch.randn_like(x)
         # No noise if t == 0
         nonzero_mask = (t != 0).float().reshape(x.shape[0], *((1,) * (len(x.shape) - 1)))
+        #print(f"p_sample output vals: {model_mean + nonzero_mask * torch.exp(0.5 * model_log_variance) * noise}")
         return model_mean + nonzero_mask * torch.exp(0.5 * model_log_variance) * noise
 
     @torch.no_grad()
     def sample(self, context, batch_size=1, channels=1):
-
+        #print(f"sample input val: {context}")
         # Initial noise for sampling
         img = torch.randn((batch_size, channels, self.image_size, self.image_size), device=context.device)
         
@@ -416,6 +483,7 @@ class GaussianDiffusion(nn.Module):
         return img.cpu(), intermediate_steps # Return final image and intermediate steps
 
 class DDPMLightning(pl.LightningModule, ABC):
+
     """
     This class implements a Denoising Diffusion Probabilistic Model (DDPM)
     adapted to the project's BaseModel structure. It handles training, validation,
@@ -477,36 +545,50 @@ class DDPMLightning(pl.LightningModule, ABC):
         """Handles the core logic for a single training or validation step."""
         conditions, targets = batch
 
+        check_nan(conditions, self.__class__.__name__, "_common_step", "input conditions")
+        check_nan(targets, self.__class__.__name__, "_common_step", "input targets")
+        
+
         # --- Data Preparation ---
         # This logic handles the `flatten_temporal_dimension` concept by reshaping the input
         if conditions.ndim == 5:
+            print("Training: conditions.ndim == 5")
             b, t, c, h, w = conditions.shape
             conditions = conditions.view(b, t * c, h, w)
+            #print(f"common step conditions: {conditions}")
         if targets.ndim == 5:
+            print("Training: targets.ndim == 5")
             targets = targets[:, -1, :, :, :]
         if targets.ndim == 3:
+            print("Training: targets.ndim == 3")
             targets = targets.unsqueeze(1)
         if targets.shape[1] > 1:
+            print("Training: targets.shape[1] > 1")
             targets = targets[:, 0:1, :, :]
+        #print(f"targets at common step method: {targets}")
 
         # --- DDPM Loss Calculation ---
-        targets_binary = (targets == 255.0).float()
+        targets_binary = targets.float()
+
         x_start = (targets_binary * 2) - 1 # Scale target to [-1, 1]
         t = torch.randint(0, self.diffusion.timesteps, (x_start.shape[0],), device=self.device).long()
         loss = self.diffusion.p_losses(x_start=x_start, t=t, context=conditions, loss_type=self.hparams.loss_function.lower())
-
+        print(f"common step loss: {loss}")
+        check_nan(loss, self.__class__.__name__, "_common_step", "final loss")
         return loss
 
     def training_step(self, batch: tuple, batch_idx: int):
         """Compute and log the training loss."""
         loss = self._common_step(batch)
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        print(f"training step loss: {loss}")
         return loss
 
     def validation_step(self, batch: tuple, batch_idx: int):
         """Compute and log the validation loss."""
         loss = self._common_step(batch)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        print(f"validation step loss: {loss}")
         return loss
 
     def test_step(self, batch: tuple, batch_idx: int):
@@ -520,7 +602,7 @@ class DDPMLightning(pl.LightningModule, ABC):
             
             # 1. Save the last channel of the conditioning data (e.g., the active fire mask)
             # We need to process it a bit to make it a viewable image
-            input_fire_mask = conditions[0, -1, :, :].cpu().numpy() # Take first item in batch, last channel
+            input_fire_mask = conditions[0, 0, -1, :, :].cpu().numpy()# Take first item in batch, last channel
             plt.imsave("debug_input_fire_mask.png", input_fire_mask, cmap='gray')
             print("Saved 'debug_input_fire_mask.png' to disk.")
 
@@ -542,35 +624,51 @@ class DDPMLightning(pl.LightningModule, ABC):
             context=conditions,
             batch_size=conditions.shape[0],
             channels=self.hparams.unet_params['out_channels']
-        )
-        
+            )
+
         predicted_probs = (generated_samples + 1) / 2.0
         predicted_probs = torch.clamp(predicted_probs, 0.0, 1.0).to(targets.device)
+        check_nan(predicted_probs, self.__class__.__name__, "test_step", "predicted_probs")
+        #print(f"predicted_probs: {predicted_probs}")
 
         # Reshape and resize targets to match predictions
         if targets.ndim == 5:
+            print("Testing: targets.ndim == 5")
             targets = targets[:, -1, :, :, :]
         if targets.ndim == 3:
+            print("Testing: targets.ndim == 3")
             targets = targets.unsqueeze(1)
         if targets.shape[1] > 1:
+            print("Testing: targets.shape[1] > 1")
             targets = targets[:, 0:1, :, :]
         if targets.shape[-2:] != predicted_probs.shape[-2:]:
+            print("Testing: targets.shape[-2:] != predicted_probs.shape[-2:]")
             targets = F.interpolate(targets.float(), size=predicted_probs.shape[-2:], mode='nearest')
+        #print(f"targets at loss method: {targets}")
 
-        targets_binary = (targets == 255.0).int()
+        #targets_binary = (targets == 255.0).int()
+        #print(f"targets_binary at loss method: {targets_binary}")
+        targets = targets.int()
+        self.test_metrics.update(predicted_probs.flatten(), targets.flatten())
+        self.test_conf_mat.update(predicted_probs.flatten(), targets.flatten())
+        self.test_pr_curve.update(predicted_probs.flatten(), targets.flatten())
 
-        self.test_metrics.update(predicted_probs.flatten(), targets_binary.flatten())
-        self.test_conf_mat.update(predicted_probs.flatten(), targets_binary.flatten())
-        self.test_pr_curve.update(predicted_probs.flatten(), targets_binary.flatten())
-
-        """
+        '''
         print(self.test_metrics["test_AP"])
         print(self.test_metrics["test_F1"])
         print(self.test_metrics["test_Precision"])
         print(self.test_metrics["test_Recall"])
         print(self.test_metrics["test_IOU"])
-        """
+        '''
+        # 1. Compute all metrics at once. This returns a dictionary.
+        computed_metrics = self.test_metrics.compute()
 
+        # 2. Print the results in a clean format.
+        print("\n--- Final Test Metrics ---")
+        for name, value in computed_metrics.items():
+            # .item() converts the tensor value to a standard Python number
+            print(f"{name}: {value.item():.4f}") 
+        print("------------------------\n")
     def on_test_epoch_end(self):
         """Log the final test metrics, confusion matrix, and PR curve."""
         self.log_dict(self.test_metrics.compute())
@@ -596,6 +694,7 @@ class DDPMLightning(pl.LightningModule, ABC):
             channels=self.hparams.unet_params['out_channels']
         )
         predicted_probs = (generated_samples + 1) / 2.0
+        #print(f"in predict_step, predicted_probs= {predicted_probs}")
         return torch.clamp(predicted_probs, 0.0, 1.0)
 
     def configure_optimizers(self):
