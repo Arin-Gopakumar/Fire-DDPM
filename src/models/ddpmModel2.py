@@ -41,8 +41,12 @@ class SinusoidalTimestepEmbedding(nn.Module):
         embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
         if self.dim % 2 == 1: # zero pad if dim is odd
             embeddings = F.pad(embeddings, (0,1))
+<<<<<<< HEAD
         #print(f"embeddings in forward method for SinusoidalTimestepEmbedding class: {embeddings}")
         check_nan(embeddings, self.__class__.__name__, "forward", "output embeddings")
+=======
+        print(f"embeddings in forward method for SinusoidalTimestepEmbedding class: {embeddings}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return embeddings
 
 class ConvBlock(nn.Module):
@@ -54,11 +58,16 @@ class ConvBlock(nn.Module):
         self.act = nn.SiLU() # Swish-like activation
 
     def forward(self, x):
+<<<<<<< HEAD
         #print(f"ConvBlock class forward function x value: {x}")
         check_nan(x, self.__class__.__name__, "forward", "input x")
         out = self.act(self.norm(self.conv(x)))
         check_nan(out, self.__class__.__name__, "forward", "output")
         return out
+=======
+        print(f"ConvBlock class forward function x value: {x}")
+        return self.act(self.norm(self.conv(x)))
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
 
 class ResnetBlock(nn.Module):
     """
@@ -81,21 +90,29 @@ class ResnetBlock(nn.Module):
         )
 
     def forward(self, x, time_emb=None):
+<<<<<<< HEAD
         
         check_nan(x, self.__class__.__name__, "forward", "input x")
         if time_emb is not None:
             check_nan(time_emb, self.__class__.__name__, "forward", "input time_emb")
         
         #print(f"ResnetBlock class forward method x value: {x}")
+=======
+        print(f"ResnetBlock class forward method x value: {x}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         h = self.block1(x)
         if self.mlp is not None and time_emb is not None:
             time_emb_out = self.mlp(time_emb)
             # Add time embedding, needs to be reshaped: (B, C) -> (B, C, 1, 1) for broadcasting
             h = h + time_emb_out.unsqueeze(-1).unsqueeze(-1)
         h = self.block2(h)
+<<<<<<< HEAD
         #print(f"ResnetBlock forward method return value: {h + self.res_conv(x)}")
         out = h + self.res_conv(x)
         check_nan(out, self.__class__.__name__, "forward", "output")
+=======
+        print(f"ResnetBlock forward method return value: {h + self.res_conv(x)}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return h + self.res_conv(x)
 
 class DownBlock(nn.Module):
@@ -106,6 +123,7 @@ class DownBlock(nn.Module):
         self.downsample = nn.Conv2d(out_channels, out_channels, kernel_size=4, stride=2, padding=1) # Strided conv for downsampling
 
     def forward(self, x, time_emb):
+        print(f"DownBlock ")
         x = self.res_block(x, time_emb)
         x_down = self.downsample(x)
         return x, x_down # Return skip connection and downsampled output
@@ -120,11 +138,19 @@ class UpBlock(nn.Module):
         self.upsample = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=4, stride=2, padding=1)
 
     def forward(self, x, skip_x, time_emb):
+<<<<<<< HEAD
         #print(f"UpBlock x value: {x}")
         x = self.upsample(x)
         x = torch.cat([skip_x, x], dim=1) # Concatenate skip connection
         x = self.res_block(x, time_emb)
         #print(f"UpBlock return x value forward function: {x}")
+=======
+        print(f"UpBlock x value: {x}")
+        x = self.upsample(x)
+        x = torch.cat([skip_x, x], dim=1) # Concatenate skip connection
+        x = self.res_block(x, time_emb)
+        print(f"UpBlock return x value forward function: {x}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return x
 
 
@@ -260,6 +286,8 @@ class UNetConditional(nn.Module):
         #if torch.all(torch.isnan(x_t)):
             #print(f"UNetConditional class forward method x value: {x_t}")
 
+        print(f"UNetConditional class forward method x value: {x}")
+
         # Now, both tensors should be 4D. The original check can proceed.
         if x_t.shape[2:] != context.shape[2:]:
             context = F.interpolate(context, size=x_t.shape[2:], mode='bilinear', align_corners=False)
@@ -315,9 +343,13 @@ class UNetConditional(nn.Module):
 
         # 7. Final layer
         output = self.final_conv(h)
+<<<<<<< HEAD
         #if torch.all(torch.isnan(output)):
             #print(f"UNetConditional class forward method output value: {output}")
         check_nan(output, self.__class__.__name__, "forward", "final output")
+=======
+        print(f"UNetConditional class forward method output value: {output}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return output
 
 class GaussianDiffusion(nn.Module):
@@ -371,8 +403,12 @@ class GaussianDiffusion(nn.Module):
         batch_size = t.shape[0]
         # Ensure 't' is on the same device as 'a' for gather operation
         out = a.gather(-1, t.to(a.device)) # Explicitly move t to a's device
+<<<<<<< HEAD
         #if torch.all(torch.isnan(out.reshape(batch_size, *((1,) * (len(x_shape) - 1))))):
             #(f"GaussianDiffusion class extract method out value: {out.reshape(batch_size, *((1,) * (len(x_shape) - 1)))}")
+=======
+        print(f"GaussianDiffusion class extract method out value: {out.reshape(batch_size, *((1,) * (len(x_shape) - 1)))}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return out.reshape(batch_size, *((1,) * (len(x_shape) - 1)))
 
     def q_sample(self, x_start, t, noise=None):
@@ -392,10 +428,14 @@ class GaussianDiffusion(nn.Module):
 
         sqrt_alphas_cumprod_t = self._extract(self.sqrt_alphas_cumprod, t, x_start.shape)
         sqrt_one_minus_alphas_cumprod_t = self._extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
+<<<<<<< HEAD
         #if torch.all(sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise):
             #print(f"GaussianDiffusion clas q_sample method return val: {sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise}")
         x_noisy = sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
         check_nan(x_noisy, self.__class__.__name__, "q_sample", "output x_noisy")
+=======
+        print(f"GaussianDiffusion clas q_sample method return val: {sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
 
     def p_losses(self, x_start, t, context, noise=None, loss_type="l2"):
@@ -429,13 +469,20 @@ class GaussianDiffusion(nn.Module):
         else:
             raise NotImplementedError()
         print(f"loss: {loss}")
+<<<<<<< HEAD
         
         check_nan(loss, self.__class__.__name__, "p_losses", "final loss")
+=======
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return loss
 
     @torch.no_grad()
     def p_mean_variance(self, x, t, context):
+<<<<<<< HEAD
         #print(f"p_mean_variance vals, x: {x}, t: {t}")
+=======
+        print(f"p_mean_variance vals, x: {x}, t: {}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         batch_size = x.shape[0]
 
         # Get values from pre-computed schedules
@@ -453,25 +500,43 @@ class GaussianDiffusion(nn.Module):
         posterior_variance_t = self._extract(self.posterior_variance, t, x.shape)
         posterior_log_variance_clipped_t = self._extract(self.posterior_log_variance_clipped, t, x.shape)
 
+<<<<<<< HEAD
         #print(f"p_mean_variance return val 1: {model_mean}")
         #print(f"p_mean_variance return val 2: {posterior_variance_t}")
         #print(f"p_mean_variance return val 3: {posterior_log_variance_clipped_t}")
+=======
+        print(f"p_mean_variance return val 1: {model_mean}")
+        print(f"p_mean_variance return val 2: {posterior_variance_t}")
+        print(f"p_mean_variance return val 3: {posterior_log_variance_clipped_t}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
 
         return model_mean, posterior_variance_t, posterior_log_variance_clipped_t
 
     @torch.no_grad()
     def p_sample(self, x, t, context, t_index):
+<<<<<<< HEAD
         #print(f"p_sample input vals: {x}, {t}, {context}, {t_index}")
+=======
+        print(f"p_sample input vals: {x}, {t}, {context}, {t_index}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         model_mean, model_variance, model_log_variance = self.p_mean_variance(x=x, t=t, context=context)
         noise = torch.randn_like(x)
         # No noise if t == 0
         nonzero_mask = (t != 0).float().reshape(x.shape[0], *((1,) * (len(x.shape) - 1)))
+<<<<<<< HEAD
         #print(f"p_sample output vals: {model_mean + nonzero_mask * torch.exp(0.5 * model_log_variance) * noise}")
+=======
+        print(f"p_sample output vals: {model_mean + nonzero_mask * torch.exp(0.5 * model_log_variance) * noise}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return model_mean + nonzero_mask * torch.exp(0.5 * model_log_variance) * noise
 
     @torch.no_grad()
     def sample(self, context, batch_size=1, channels=1):
+<<<<<<< HEAD
         #print(f"sample input val: {context}")
+=======
+        print(f"sample input val: {context}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         # Initial noise for sampling
         img = torch.randn((batch_size, channels, self.image_size, self.image_size), device=context.device)
         
@@ -555,7 +620,11 @@ class DDPMLightning(pl.LightningModule, ABC):
             print("Training: conditions.ndim == 5")
             b, t, c, h, w = conditions.shape
             conditions = conditions.view(b, t * c, h, w)
+<<<<<<< HEAD
             #print(f"common step conditions: {conditions}")
+=======
+            print(f"common step conditions: {conditions}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         if targets.ndim == 5:
             print("Training: targets.ndim == 5")
             targets = targets[:, -1, :, :, :]
@@ -565,7 +634,11 @@ class DDPMLightning(pl.LightningModule, ABC):
         if targets.shape[1] > 1:
             print("Training: targets.shape[1] > 1")
             targets = targets[:, 0:1, :, :]
+<<<<<<< HEAD
         #print(f"targets at common step method: {targets}")
+=======
+        print(f"targets at common step method: {targets}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
 
         # --- DDPM Loss Calculation ---
         targets_binary = targets.float()
@@ -574,7 +647,10 @@ class DDPMLightning(pl.LightningModule, ABC):
         t = torch.randint(0, self.diffusion.timesteps, (x_start.shape[0],), device=self.device).long()
         loss = self.diffusion.p_losses(x_start=x_start, t=t, context=conditions, loss_type=self.hparams.loss_function.lower())
         print(f"common step loss: {loss}")
+<<<<<<< HEAD
         check_nan(loss, self.__class__.__name__, "_common_step", "final loss")
+=======
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return loss
 
     def training_step(self, batch: tuple, batch_idx: int):
@@ -628,8 +704,12 @@ class DDPMLightning(pl.LightningModule, ABC):
 
         predicted_probs = (generated_samples + 1) / 2.0
         predicted_probs = torch.clamp(predicted_probs, 0.0, 1.0).to(targets.device)
+<<<<<<< HEAD
         check_nan(predicted_probs, self.__class__.__name__, "test_step", "predicted_probs")
         #print(f"predicted_probs: {predicted_probs}")
+=======
+        print(f"predicted_probs: {predicted_probs}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
 
         # Reshape and resize targets to match predictions
         if targets.ndim == 5:
@@ -644,6 +724,7 @@ class DDPMLightning(pl.LightningModule, ABC):
         if targets.shape[-2:] != predicted_probs.shape[-2:]:
             print("Testing: targets.shape[-2:] != predicted_probs.shape[-2:]")
             targets = F.interpolate(targets.float(), size=predicted_probs.shape[-2:], mode='nearest')
+<<<<<<< HEAD
         #print(f"targets at loss method: {targets}")
 
         #targets_binary = (targets == 255.0).int()
@@ -652,6 +733,12 @@ class DDPMLightning(pl.LightningModule, ABC):
         self.test_metrics.update(predicted_probs.flatten(), targets.flatten())
         self.test_conf_mat.update(predicted_probs.flatten(), targets.flatten())
         self.test_pr_curve.update(predicted_probs.flatten(), targets.flatten())
+=======
+        print(f"targets at loss method: {targets}")
+
+        targets_binary = (targets == 255.0).int()
+        print(f"targets_binary at loss method: {targets_binary}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
 
         '''
         print(self.test_metrics["test_AP"])
@@ -694,7 +781,11 @@ class DDPMLightning(pl.LightningModule, ABC):
             channels=self.hparams.unet_params['out_channels']
         )
         predicted_probs = (generated_samples + 1) / 2.0
+<<<<<<< HEAD
         #print(f"in predict_step, predicted_probs= {predicted_probs}")
+=======
+        print(f"in predict_step, predicted_probs= {predicted_probs}")
+>>>>>>> 459f0c88e2c9152ffd2ffed673675f36631f656b
         return torch.clamp(predicted_probs, 0.0, 1.0)
 
     def configure_optimizers(self):
